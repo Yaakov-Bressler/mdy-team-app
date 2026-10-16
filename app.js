@@ -36,9 +36,27 @@
       .toLowerCase();
   }
   function stageColor(s) { return C.stageColors[s] || '#8a8f98'; }
-  function stageChip(s) {
+  function stageChip(s, label) {
     var c = stageColor(s);
-    return '<span class="stage" style="background:' + c + ';color:' + (LIGHT[c] ? '#1a1814' : '#fff') + '">' + esc(s || '—') + '</span>';
+    return '<span class="stage" style="background:' + c + ';color:' + (LIGHT[c] ? '#1a1814' : '#fff') + '">' + esc(label || s || '—') + '</span>';
+  }
+  function stageIn(text) {
+    var names = (S.stages || Object.keys(C.stageColors)).slice().sort(function (a, b) { return b.length - a.length; });
+    for (var i = 0; i < names.length; i++) {
+      if (text === names[i] || text.indexOf(names[i] + ' ') === 0 || text.indexOf(names[i] + '(') === 0) return names[i];
+    }
+    return null;
+  }
+  var AMUD_RE = /\b(\d{1,3})\s*([ab])\b(?:\s*\((\d)\))?/gi;
+  function amudList(text) {
+    var out = [], m;
+    AMUD_RE.lastIndex = 0;
+    while ((m = AMUD_RE.exec(text))) out.push({ k: parseInt(m[1], 10) * 10 + (m[2].toLowerCase() === 'b' ? 5 : 0), part: m[3] ? parseInt(m[3], 10) : null });
+    return out;
+  }
+  function rowAmud(r) {
+    var m = /(\d{1,3})\s*([ab])\b(?:\s*\((\d)\))?/i.exec(r.title || '');
+    return m ? { k: parseInt(m[1], 10) * 10 + (m[2].toLowerCase() === 'b' ? 5 : 0), part: m[3] ? parseInt(m[3], 10) : null } : null;
   }
   var ICON = {
     star: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5l2.6 5.4 5.9.8-4.3 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8-4.3-4.1 5.9-.8z"/></svg>',
@@ -246,14 +264,39 @@
     if (i > -1) s.splice(i, 1); else s.push(String(id));
     try { localStorage.setItem('mdy-stars', JSON.stringify(s)); } catch (e) { /* ignore */ }
   }
+  function markFromDeadlines() {
+    S.fromDl = {};
+    if (!S.tracker || !S.deadlines) return;
+    S.deadlines.filter(function (d) { return (d.days == null || d.days >= 0) && deadlineIsMine(d); }).forEach(function (d) {
+      var am = d.lines.filter(function (l) { return l.amudim; })[0];
+      if (!am) return;
+      var stg = d.lines.filter(function (l) { return l.stage; })[0];
+      var txt = (d.title + ' ' + d.lines.map(function (l) { return l.value; }).join(' '));
+      var mas = C.masechtos.filter(function (m) { return txt.indexOf(m) > -1; })[0];
+      if (!mas) return;
+      var list = S.stages || [];
+      var target = stg ? list.indexOf(stg.stage) : -1;
+      S.tracker.forEach(function (r) {
+        if (r.masechta !== mas) return;
+        var ra = rowAmud(r);
+        if (!ra) return;
+        var hit = am.amudim.some(function (a) { return a.k === ra.k && (a.part == null || a.part === ra.part); });
+        if (!hit) return;
+        if (target > -1 && list.indexOf(r.stage) >= target) return;
+        S.fromDl[r.id] = d;
+      });
+    });
+  }
   function isMine(r) {
     var sn = surname();
     if (isStarred(r.id)) return true;
+    if (S.fromDl && S.fromDl[r.id]) return true;
     if (!sn || sn.length < 3) return false;
     return (r.writer + ' ' + r.editor).toLowerCase().indexOf(sn) > -1;
   }
   function personLine(r) {
     var bits = [];
+    if (S.fromDl && S.fromDl[r.id] && !isStarred(r.id)) bits.push('Your deadline: ' + fmtDate(S.fromDl[r.id].due));
     if (r.editor) bits.push('Editor: ' + r.editor);
     else if (r.writer) bits.push('Writer: ' + r.writer);
     if (r.workflow) bits.push(r.workflow + ' workflow');
@@ -288,7 +331,14 @@
       for (var i = 0; i < extra.length; i++) {
         var c = extra[i], v = await fieldText(f, c.name);
         if (v === '' && typeof f[c.name] === 'number') v = String(f[c.name]);
-        if (v) lines.push({ label: c.displayName, value: v, he: hasHe(v), job: /^job$/i.test(c.displayName) });
+        if (!v) continue;
+        v = String(v).trim();
+        var line = { label: c.displayName, value: v, he: hasHe(v), job: /^job$/i.test(c.displayName) };
+        if (/@/.test(v) || /^(on|off|yes|no|true|false)$/i.test(v)) continue;
+        var am = amudList(v);
+        if (am.length >= 2 && v.replace(AMUD_RE, '').replace(/[\s,;.&and]+/gi, '').length < 6) { line.amudim = am; }
+        else if (!line.job && v.length < 40 && stageIn(v)) { line.stage = stageIn(v); }
+        lines.push(line);
       }
       var due = dueCol ? f[dueCol.name] : null;
       return { id: it.id, title: f.Title || '', due: due, days: daysUntil(due), lines: lines };
@@ -305,7 +355,17 @@
   function deadlineCard(d) {
     var job = d.lines.filter(function (l) { return l.job; })[0];
     var heb = d.lines.filter(function (l) { return l.he && !l.job; });
-    var other = d.lines.filter(function (l) { return !l.he && !l.job; });
+    var am = d.lines.filter(function (l) { return l.amudim; })[0];
+    var stg = d.lines.filter(function (l) { return l.stage; })[0];
+    var seen = {};
+    if (job) seen[job.value] = 1;
+    var other = d.lines.filter(function (l) {
+      if (l.he || l.job || l.amudim || l.stage || seen[l.value]) return false;
+      seen[l.value] = 1; return true;
+    });
+    var facts = [];
+    if (stg) facts.push(stageChip(stg.stage, 'Due at ' + stg.stage));
+    if (am) facts.push('<span class="tag">' + am.amudim.length + ' amudim</span>');
     var cls = d.days == null ? '' : d.days < 0 ? 'late' : d.days <= 7 ? 'soon' : '';
     var daysTxt = d.days == null ? '–' : Math.abs(d.days);
     var daysLbl = d.days == null ? '' : d.days < 0 ? 'days late' : d.days === 1 ? 'day' : 'days';
@@ -313,7 +373,8 @@
     return '<article class="card dl"><div class="days ' + cls + '"><b>' + esc(daysTxt) + '</b><span>' + esc(daysLbl) + '</span></div><div class="dt">' +
       (job ? '<span class="tag">' + esc(job.value) + '</span>' : '') +
       '<b>' + esc(d.title) + '</b>' +
-      other.map(function (l) { return '<span>' + esc(l.value) + '</span>'; }).join('') +
+      other.map(function (l) { return '<span class="clamp">' + esc(l.value) + '</span>'; }).join('') +
+      (facts.length ? '<span style="display:flex;gap:6px;flex-wrap:wrap;margin-top:2px">' + facts.join('') + '</span>' : '') +
       '<span style="color:var(--muted)">' + esc(fmtDate(d.due)) + heb.map(function (l) { return ' · <span lang="he" dir="rtl">' + esc(l.value) + '</span>'; }).join('') + '</span>' +
       '</div></article>';
   }
@@ -452,6 +513,7 @@
     });
     return t;
   }
+  var SKIP_HEADS = /^(search words|notes to claude|open questions from claude|recent changes|start here)/i;
   function searchDoc(doc, q, mode) {
     var nq = norm(q).trim();
     if (!nq) return [];
@@ -459,6 +521,7 @@
     var hits = [];
     doc.entries.forEach(function (e) {
       if (e.kind === 'h') return;
+      if (!mode.table && SKIP_HEADS.test(e.heading || '')) return;
       if (mode.table && !(e.cells && e.cells.length > 1) && e.kind !== 'row') return;
       if (!words.every(function (w) { return e.n.indexOf(w) > -1; })) return;
       var score = 3;
@@ -491,7 +554,7 @@
   function frame(o) {
     $('#kicker').innerHTML = o.back ? '<a href="' + o.back + '">' + ICON.back + esc(o.backLabel || 'Back') + '</a>' : esc(o.kicker || 'MDY Aleh Zayis Team');
     $('#title').textContent = o.title;
-    document.title = o.title + ' · MDY Team';
+    document.title = o.title === 'MDY Team' ? 'MDY Team' : o.title + ' · MDY Team';
     $('#subhead').innerHTML = o.sub || '';
     $('#refresh').hidden = !o.refresh;
     $$('#tabs a').forEach(function (a) {
@@ -510,6 +573,7 @@
     loading();
     var res = await Promise.all([loadTracker(), loadDeadlines().catch(function () { return []; })]);
     var rows = res[0], dls = res[1];
+    markFromDeadlines();
     var mine = rows.filter(isMine);
     var upcoming = dls.filter(function (d) { return d.days != null && d.days >= 0; });
     var myNext = upcoming.filter(deadlineIsMine)[0] || upcoming[0];
@@ -519,7 +583,8 @@
     h += '<a class="btn block" href="#/submit">' + ICON.up + 'Submit work</a>';
     h += '<h2 class="sec">Your amudim <small>' + mine.length + '</small></h2>';
     if (mine.length) h += '<div class="rows">' + mine.map(rowHtml).join('') + '</div>';
-    else h += '<div class="card empty">Nothing is under your name on the tracker yet. Tap the star on any amud in the Tracker to keep it here.</div>';
+    else h += '<div class="card empty">Nothing is under your name yet. Tap the star on any amud in the Tracker to keep it here.</div>';
+    if (mine.length) h += '<p class="note">Amudim from your deadlines that haven’t reached the deadline’s stage, plus any you’ve starred.</p>';
     h += '<h2 class="sec">Quick links</h2><div class="card pad0 navlist">' +
       '<a href="#/guide">' + ICON.pen.replace('M4 20l1-4L16 5a2.1 2.1 0 0 1 3 3L8 19z', 'M11 4.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zM16 16l4.5 4.5') + '<span class="grow">Look-ups and style guide</span>' + ICON.chev + '</a>' +
       '<a href="#/deadlines">' + ICON.cal + '<span class="grow">All deadlines</span>' + ICON.chev + '</a>' +
@@ -554,7 +619,7 @@
     var done = (counts.Final || 0) + (counts.Closed || 0);
     var h = '<section class="card" aria-label="Progress"><div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px"><b>' + esc(m) + ' · ' + shown.length + ' rows</b><span class="note">' + done + ' final</span></div>' +
       '<div class="bar">' + order.map(function (s) { return '<i style="flex:' + counts[s] + ';background:' + stageColor(s) + '" title="' + esc(s) + '"></i>'; }).join('') + '</div>' +
-      '<div class="legend">' + order.map(function (s) { return stageChip(s + ' ' + counts[s]).replace(esc(s + ' ' + counts[s]), esc(s) + ' ' + counts[s]).replace('background:' + stageColor(s + ' ' + counts[s]), 'background:' + stageColor(s)).replace(/color:#[0-9a-f]+"/, 'color:' + (LIGHT[stageColor(s)] ? '#1a1814' : '#fff') + '"'); }).join('') + '</div></section>';
+      '<div class="legend">' + order.map(function (s) { return stageChip(s, s + ' ' + counts[s]); }).join('') + '</div></section>';
     h += '<p class="note">Tap an amud to move it to another stage. The star keeps it in My work.</p>';
     h += '<div class="grid2">' + shown.map(function (r) {
       return '<div style="position:relative"><button class="card-btn" style="border-top-color:' + stageColor(r.stage) + ';width:100%" data-act="move" data-id="' + esc(r.id) + '">' +
@@ -601,6 +666,8 @@
     frame({ title: 'Submit work', tab: 'submit', kicker: 'Hand in an amud' });
     loading();
     var rows = await loadTracker();
+    await loadDeadlines().catch(function () { return []; });
+    markFromDeadlines();
     var s = S.submit;
     if (!s || (rowId && s.rowId !== rowId) || s.sent) {
       var mine = rows.filter(isMine);
@@ -726,7 +793,7 @@
     var q = S.guideQ.trim();
     var foot = '<p class="note">From <a href="' + esc(doc.file.webUrl) + '" target="_blank" rel="noopener">' + esc(doc.file.name) + '</a>, read live from Resources.</p>';
     if (!q) {
-      var heads = doc.entries.filter(function (e) { return e.kind === 'h'; }).slice(0, 40);
+      var heads = doc.entries.filter(function (e) { return e.kind === 'h' && !SKIP_HEADS.test(e.text); }).slice(0, 40);
       var intro = mode.table ? '<div class="card empty">Type a word in Hebrew or English.</div>'
         : '<h2 class="sec">Sections</h2><div class="card pad0 navlist">' + (heads.length ? heads.map(function (e) { return '<button data-act="ghead" data-t="' + esc(e.text) + '"><span class="grow">' + esc(e.text) + '</span>' + ICON.chev + '</button>'; }).join('') : '<div class="empty">Type to search.</div>') + '</div>';
       setView(intro + foot);
@@ -801,12 +868,12 @@
       return;
     }
     frame({ title: 'Graphics', tab: 'more', back: '#/more', backLabel: 'More', refresh: true, sub: sub });
-    var folders = items.filter(function (x) { return x.folder; });
+    var folders = items.filter(function (x) { return x.folder && x.name[0] !== '.' && !/^archive$/i.test(x.name); });
     folders.sort(function (a, b) {
       var ia = C.graphicsStages.indexOf(a.name), ib = C.graphicsStages.indexOf(b.name);
       return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib) || (a.name < b.name ? -1 : 1);
     });
-    var sheets = items.filter(function (x) { return x.file; });
+    var sheets = items.filter(function (x) { return x.file && /\.(xlsx|docx)$/i.test(x.name) && x.name[0] !== '.'; });
     var h = '<p class="note">' + esc(m) + ' pictures by stage. Each stage is a folder in ' + esc(gf.name) + '.</p><div class="card pad0 navlist">' +
       folders.map(function (f) {
         return '<a href="#/graphics/' + encodeURIComponent(f.name) + '"><span class="grow">' + esc(f.name) + '</span><span class="aside">' + (f.folder.childCount || 0) + '</span>' + ICON.chev + '</a>';

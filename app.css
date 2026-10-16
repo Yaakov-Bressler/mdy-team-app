@@ -177,3 +177,4 @@ mark { background: #f6e6c6; color: inherit; border-radius: 3px; padding: 0 1px; 
 .signin h2 { margin: 0; font-family: var(--serif); font-size: 28px; }
 .signin p { margin: 0; color: var(--ink-2); max-width: 320px; }
 .slogan { text-align: center; font-family: var(--serif); font-style: italic; color: var(--muted); margin: 8px 0 0; }
+.clamp { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
