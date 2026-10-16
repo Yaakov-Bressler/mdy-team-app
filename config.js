@@ -14,6 +14,7 @@ window.MDY_CONFIG = {
   masechtos: ['Kerisos', 'Meilah', 'Tamid', 'Midos', 'Kinim', 'Temurah'],
   prefixes: { Kerisos: 'KER', Meilah: 'MEI', Tamid: 'TAM', Midos: 'MID', Kinim: 'KIN', Temurah: 'TEM' },
   resourcesFolder: 'Resources',
+  siteAssetsDrive: 'b!-uVDfUf5LEeRULpN1gypU3ud3ezGcDxOi7ykzS1m9EU_rOsoceDARo88MgL_5cmC',
   contactsPage: 'Contacts.aspx',
   chatUrl: 'https://chat.google.com/room/AAQAnjn0HSU?cls=5',
   graphicsStages: ['Requests', 'Writer Requests', 'Prompts', 'Needs Approval', 'Ready for Review', 'Ready for Designer', 'Ready for Designing', 'Pending Charts', 'Ready to Go', 'Rejected'],

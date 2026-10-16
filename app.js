@@ -507,8 +507,12 @@
   async function idbPut(k, v) { var db = await idb(); if (!db) return; try { db.transaction('files', 'readwrite').objectStore('files').put(v, k); } catch (e) { /* storage full: fine */ } }
   async function assetsDrive() {
     if (!S.assets) {
-      var ds = await gAll('/sites/' + (await siteId()) + '/drives?$select=id,name,webUrl');
-      S.assets = ds.filter(function (x) { return /^site ?assets$/i.test(x.name); })[0];
+      var sid = await siteId();
+      // Site Assets is a system library that /drives leaves out: try its known id, then the list by name
+      try { S.assets = await g('/drives/' + C.siteAssetsDrive + '?$select=id,name,webUrl'); } catch (e) { S.assets = null; }
+      if (!S.assets) {
+        try { S.assets = await g('/sites/' + sid + '/lists/' + encodeURIComponent('Site Assets') + '/drive?$select=id,name,webUrl'); } catch (e) { S.assets = null; }
+      }
       if (!S.assets) throw new Error('The Site Assets library was not found.');
     }
     return S.assets.id;
