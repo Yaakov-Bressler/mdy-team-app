@@ -69,6 +69,7 @@
     pen: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20l1-4L16 5a2.1 2.1 0 0 1 3 3L8 19z"/></svg>',
     person: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg>',
     chat: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z"/></svg>',
+    folder: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5H9l2 2.5h8.5A1.5 1.5 0 0 1 21 9v9.5a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18.5z"/></svg>',
     ext: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>',
     out: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-4M10 16l-4-4 4-4M6 12h10"/></svg>',
     file: '<svg viewBox="0 0 24 24" aria-hidden="true" style="width:22px;height:22px;fill:none;stroke:#1d3d6b;stroke-width:2;stroke-linecap:round;stroke-linejoin:round"><path d="M14 3H6.5A1.5 1.5 0 0 0 5 4.5v15A1.5 1.5 0 0 0 6.5 21h11a1.5 1.5 0 0 0 1.5-1.5V8z"/><path d="M14 3v5h5"/></svg>'
@@ -474,11 +475,202 @@
     return out;
   }
   var GUIDE = [
-    { key: 'Spelling', match: /translit/i, ph: 'Hebrew or English word', table: true },
-    { key: 'Definitions', match: /definition/i, ph: 'Look up a term', table: true },
-    { key: 'Rulings', match: /rulings/i, ph: 'What’s our rule on…', table: false },
-    { key: 'Style', match: /style guide/i, ph: 'Search the Style Guide', table: false }
+    { key: 'Spelling', kind: 'doc', match: /translit/i, ph: 'Hebrew or English word', table: true },
+    { key: 'Phrases', kind: 'corpus', ph: 'How was this phrase rendered?' },
+    { key: 'Headers', kind: 'headers', ph: 'Which header was used?' },
+    { key: 'Definitions', kind: 'doc', match: /definition/i, ph: 'Look up a term', table: true },
+    { key: 'Rulings', kind: 'doc', match: /rulings/i, ph: 'What’s our rule on…', table: false },
+    { key: 'Style', kind: 'doc', match: /style guide/i, ph: 'Search the Style Guide', table: false }
   ];
+
+  /* ---------- the Guide page's corpus and headers index (Site Assets/MDYLookup) ---------- */
+  var IDB = null;
+  function idb() {
+    if (IDB) return IDB;
+    IDB = new Promise(function (res) {
+      try {
+        var r = indexedDB.open('mdy-team', 1);
+        r.onupgradeneeded = function () { r.result.createObjectStore('files'); };
+        r.onsuccess = function () { res(r.result); };
+        r.onerror = function () { res(null); };
+      } catch (e) { res(null); }
+    });
+    return IDB;
+  }
+  async function idbGet(k) {
+    var db = await idb(); if (!db) return null;
+    return new Promise(function (res) {
+      try { var q = db.transaction('files').objectStore('files').get(k); q.onsuccess = function () { res(q.result || null); }; q.onerror = function () { res(null); }; }
+      catch (e) { res(null); }
+    });
+  }
+  async function idbPut(k, v) { var db = await idb(); if (!db) return; try { db.transaction('files', 'readwrite').objectStore('files').put(v, k); } catch (e) { /* storage full: fine */ } }
+  async function assetsDrive() {
+    if (!S.assets) {
+      var ds = await gAll('/sites/' + (await siteId()) + '/drives?$select=id,name,webUrl');
+      S.assets = ds.filter(function (x) { return /^site ?assets$/i.test(x.name); })[0];
+      if (!S.assets) throw new Error('The Site Assets library was not found.');
+    }
+    return S.assets.id;
+  }
+  async function assetJson(name, onStatus) {
+    if (TEST) return TEST.asset(name);
+    var d = await assetsDrive();
+    var item = await g('/drives/' + d + '/root:/MDYLookup/' + encodeURIComponent(name));
+    var tag = item.eTag || item.lastModifiedDateTime;
+    var hit = await idbGet(name);
+    if (hit && hit.tag === tag) return hit.data;
+    if (onStatus) onStatus('Downloading ' + name.replace(/\.json$/, '') + ' (' + (item.size / 1048576).toFixed(1) + ' MB, once)…');
+    var data = await (await fetch(item['@microsoft.graph.downloadUrl'])).json();
+    idbPut(name, { tag: tag, data: data });
+    return data;
+  }
+  async function corpusIndex() {
+    if (!S.cidx) S.cidx = await assetJson('corpus-index.json');
+    return S.cidx;
+  }
+  async function loadCorpus(m, onStatus) {
+    S.corp = S.corp || {};
+    if (!S.corp[m]) {
+      var e = (await corpusIndex()).masechtos.filter(function (x) { return x.name === m; })[0];
+      if (!e) return [];
+      var raw = await assetJson(e.file, onStatus);
+      S.corp[m] = raw.map(function (r, i) { return { m: m, i: i, daf: r[0], heb: r[1] || '', eng: r[2] || '', rich: Array.isArray(r[3]) ? r[3] : null, part: r[4] || 1 }; });
+    }
+    return S.corp[m];
+  }
+  async function loadHeaders(m) {
+    S.hdr = S.hdr || {};
+    if (!S.hdr[m]) {
+      var e = (await corpusIndex()).masechtos.filter(function (x) { return x.name === m; })[0];
+      if (!e || !e.hfile) { S.hdr[m] = []; return []; }
+      var raw = await assetJson(e.hfile);
+      S.hdr[m] = raw.map(function (r) { return { m: m, daf: r[0], text: r[1] || '', rich: Array.isArray(r[2]) ? r[2] : null, kind: r[3], ord: r[4], part: r[5] || 1 }; });
+    }
+    return S.hdr[m];
+  }
+  function heTok(s) { return norm(s).replace(/[^\u05d0-\u05ea\s]/g, ' ').split(/\s+/).filter(Boolean); }
+  function enNorm(s) { return norm(s).replace(/\s+/g, ' ').trim(); }
+  function enKey(s) { return enNorm(s).replace(/^[\s.,;:!?"'()\[\]\u2014\u2013-]+|[\s.,;:!?"'()\[\]\u2014\u2013-]+$/g, ''); }
+  function seqAt(tokens, s, qt, partialLast) {
+    for (var k = 0; k < qt.length; k++) {
+      var t = tokens[s + k];
+      if (t == null) return false;
+      if (k === qt.length - 1 && partialLast) { if (t.indexOf(qt[k]) !== 0) return false; }
+      else if (t !== qt[k]) return false;
+    }
+    return true;
+  }
+  function richHtml(rich, text, words) {
+    if (!rich) return hl(text, words || []);
+    return rich.map(function (seg) { var t = hl(seg[0], words || []); return seg[1] ? '<em>' + t + '</em>' : t; }).join('');
+  }
+  function phraseSearch(sets, q) {
+    var groups = {}, list = [], total = 0, CAP = 6000;
+    function add(rows, i, span, exact) {
+      if (total >= CAP) return;
+      total++;
+      var parts = rows.slice(i, i + span);
+      var eng = parts.map(function (r) { return r.eng; }).join(' ');
+      var key = enKey(eng);
+      var gr = groups[key];
+      if (!gr) {
+        gr = groups[key] = { key: key, eng: eng, rich: parts.every(function (r) { return r.rich; }) ? [].concat.apply([], parts.map(function (r, k) { return k ? [[' ', false]].concat(r.rich) : r.rich; })) : null,
+          heb: parts.map(function (r) { return r.heb; }).join(' '), hits: [], exact: false };
+        list.push(gr);
+      }
+      if (exact) gr.exact = true;
+      gr.hits.push({ m: rows[i].m, i: i, span: span, daf: rows[i].daf, part: rows[i].part });
+    }
+    if (hasHe(q)) {
+      var qt = heTok(q);
+      if (!qt.length) return null;
+      var n = qt.length, partialLast = n > 1 ? true : qt[0].length >= 2;
+      sets.forEach(function (rows) {
+        for (var i = 0; i < rows.length && total < CAP; i++) {
+          var r = rows[i];
+          if (!r.tok) r.tok = heTok(r.heb);
+          var found = false;
+          for (var st = 0; st <= r.tok.length - n; st++) { if (seqAt(r.tok, st, qt, partialLast)) { found = true; break; } }
+          if (found) { add(rows, i, 1, n === r.tok.length && seqAt(r.tok, 0, qt, false)); continue; }
+          if (n < 2 || !r.tok.length) continue;
+          var joined = r.tok.slice(), span = 1;
+          for (var j = i + 1; j < rows.length && span < 5; j++) {
+            var nr = rows[j];
+            if (nr.daf !== r.daf || nr.part !== r.part) break;
+            if (!nr.tok) nr.tok = heTok(nr.heb);
+            joined = joined.concat(nr.tok); span++;
+            var hit = false;
+            for (var s2 = Math.max(0, r.tok.length - n + 1); s2 < r.tok.length; s2++) { if (seqAt(joined, s2, qt, partialLast)) { hit = true; break; } }
+            if (hit) { add(rows, i, span, false); break; }
+            if (joined.length >= r.tok.length - 1 + n) break;
+          }
+        }
+      });
+    } else {
+      var nq = enNorm(q);
+      if (nq.length < 2) return null;
+      var multi = nq.indexOf(' ') > -1;
+      sets.forEach(function (rows) {
+        for (var i = 0; i < rows.length && total < CAP; i++) {
+          var r = rows[i];
+          if (r.ne == null) r.ne = enNorm(r.eng);
+          if (r.ne.indexOf(nq) > -1) { add(rows, i, 1, enKey(r.eng) === enKey(q)); continue; }
+          if (!multi) continue;
+          var nr = rows[i + 1];
+          if (!nr || nr.daf !== r.daf || nr.part !== r.part) continue;
+          if (nr.ne == null) nr.ne = enNorm(nr.eng);
+          var both = r.ne + ' ' + nr.ne, at = both.indexOf(nq);
+          if (at > -1 && at < r.ne.length) add(rows, i, 2, false);
+        }
+      });
+    }
+    list.sort(function (a, b) { return (b.exact - a.exact) || (b.hits.length - a.hits.length); });
+    return { groups: list, total: total, capped: total >= CAP };
+  }
+  function headerSearch(sets, q) {
+    var map = {}, list = [];
+    sets.forEach(function (rows) {
+      rows.forEach(function (h) {
+        var key = enKey(h.text);
+        if (!key) return;
+        var gr = map[key];
+        if (!gr) { gr = map[key] = { key: key, text: h.text, rich: h.rich, items: [], kinds: { o: 0, m: 0, s: 0 } }; list.push(gr); }
+        gr.items.push(h);
+        if (gr.kinds[h.kind] != null) gr.kinds[h.kind]++;
+      });
+    });
+    var nq = enKey(q || '');
+    if (!nq) { list.sort(function (a, b) { return b.items.length - a.items.length; }); return list; }
+    var words = nq.split(' '), reWord = new RegExp('\\b' + nq.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b');
+    var scored = [];
+    list.forEach(function (gr) {
+      var k = gr.key, sc = -1;
+      if (k === nq) sc = 0;
+      else if (k.indexOf(nq) === 0) sc = 1;
+      else if (reWord.test(k)) sc = 2;
+      else if (words.every(function (w) { return k.indexOf(w) > -1; })) sc = k.indexOf(nq) > -1 ? 3 : 4;
+      if (sc > -1) scored.push({ gr: gr, sc: sc });
+    });
+    scored.sort(function (a, b) { return a.sc - b.sc || b.gr.items.length - a.gr.items.length; });
+    return scored.map(function (x) { return x.gr; });
+  }
+  function citeChips(hits, act, keyName) {
+    var by = [], seen = {};
+    hits.forEach(function (h) {
+      var k = h.m + ' ' + h.daf + (h.part > 1 ? ' (' + h.part + ')' : '');
+      if (!seen[k]) { seen[k] = { label: k, h: h, n: 0 }; by.push(seen[k]); }
+      seen[k].n++;
+    });
+    var open = S.expanded && S.expanded[keyName];
+    var shown = open ? by : by.slice(0, 8);
+    var html = shown.map(function (c) {
+      var h = c.h;
+      return '<button class="cite" data-act="' + act + '" data-m="' + esc(h.m) + '" data-i="' + (h.i != null ? h.i : h.ord) + '" data-span="' + (h.span || 1) + '"' + (h.text ? ' data-h="' + esc(h.text) + '"' : '') + '>' + esc(c.label) + (c.n > 1 ? ' ×' + c.n : '') + '</button>';
+    }).join('');
+    if (by.length > shown.length) html += '<button class="cite more" data-act="expand" data-k="' + esc(keyName) + '">+' + (by.length - shown.length) + ' more</button>';
+    return '<div class="cites">' + html + '</div>';
+  }
   async function resourceFiles() {
     var res = (await rootKids()).filter(function (x) { return x.folder && x.name.toLowerCase() === C.resourcesFolder.toLowerCase(); })[0];
     if (!res) throw new Error('The Resources folder was not found in the library.');
@@ -557,10 +749,14 @@
     document.title = o.title === 'MDY Team' ? 'MDY Team' : o.title + ' · MDY Team';
     $('#subhead').innerHTML = o.sub || '';
     $('#refresh').hidden = !o.refresh;
-    $$('#tabs a').forEach(function (a) {
-      if (a.getAttribute('data-tab') === o.tab) a.setAttribute('aria-current', 'page');
-      else a.removeAttribute('aria-current');
+    var base = currentRoute().replace(/^\/?/, '').split('/')[0] || 'home';
+    var links = $$('#tabs a');
+    links.forEach(function (a) {
+      var t = a.getAttribute('data-tab');
+      // the rail link for this screen (wide screens) and its bottom tab (phones, e.g. More)
+      if (t === base || t === o.tab) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
     });
+    view().setAttribute('data-screen', base);
   }
   function setView(html) { view().innerHTML = html; }
   function loading(msg) { setView('<div class="loading">' + esc(msg || 'Loading…') + '</div>'); }
@@ -578,17 +774,18 @@
     var upcoming = dls.filter(function (d) { return d.days != null && d.days >= 0; });
     var myNext = upcoming.filter(deadlineIsMine)[0] || upcoming[0];
     frame({ title: 'My work', tab: 'home', refresh: true, kicker: (S.me && S.me.displayName) || 'MDY Aleh Zayis Team' });
-    var h = '';
+    var h = '<div class="homegrid"><div class="hg-top">';
     if (myNext) h += '<a class="card dl" href="#/deadlines" style="text-decoration:none">' + deadlineCard(myNext).replace(/^<article class="card dl">|<\/article>$/g, '') + '</a>';
-    h += '<a class="btn block" href="#/submit">' + ICON.up + 'Submit work</a>';
+    h += '<a class="btn block" href="#/submit">' + ICON.up + 'Submit work</a></div><div class="hg-list">';
     h += '<h2 class="sec">Your amudim <small>' + mine.length + '</small></h2>';
     if (mine.length) h += '<div class="rows">' + mine.map(rowHtml).join('') + '</div>';
     else h += '<div class="card empty">Nothing is under your name yet. Tap the star on any amud in the Tracker to keep it here.</div>';
     if (mine.length) h += '<p class="note">Amudim from your deadlines that haven’t reached the deadline’s stage, plus any you’ve starred.</p>';
-    h += '<h2 class="sec">Quick links</h2><div class="card pad0 navlist">' +
-      '<a href="#/guide">' + ICON.pen.replace('M4 20l1-4L16 5a2.1 2.1 0 0 1 3 3L8 19z', 'M11 4.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zM16 16l4.5 4.5') + '<span class="grow">Look-ups and style guide</span>' + ICON.chev + '</a>' +
+    h += '</div><div class="hg-links"><h2 class="sec">Quick links</h2><div class="card pad0 navlist">' +
+      '<a href="#/guide">' + ICON.pen.replace('M4 20l1-4L16 5a2.1 2.1 0 0 1 3 3L8 19z', 'M11 4.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zM16 16l4.5 4.5') + '<span class="grow">Look-ups, phrases and headers</span>' + ICON.chev + '</a>' +
       '<a href="#/deadlines">' + ICON.cal + '<span class="grow">All deadlines</span>' + ICON.chev + '</a>' +
-      '<a href="' + esc(C.chatUrl) + '" target="_blank" rel="noopener">' + ICON.chat + '<span class="grow">Team chat</span>' + ICON.ext + '</a></div>';
+      '<a href="#/files">' + ICON.folder + '<span class="grow">Files</span>' + ICON.chev + '</a>' +
+      '<a href="' + esc(C.chatUrl) + '" target="_blank" rel="noopener">' + ICON.chat + '<span class="grow">Team chat</span>' + ICON.ext + '</a></div></div></div>';
     setView(h);
   }
   function rowHtml(r) {
@@ -773,21 +970,133 @@
     }
   }
 
+  function guideMode() { return GUIDE.filter(function (x) { return x.key === S.guideMode; })[0] || GUIDE[0]; }
   async function screenGuide() {
-    var mode = GUIDE.filter(function (x) { return x.key === S.guideMode; })[0] || GUIDE[0];
-    var sub = '<div class="chips" role="group" aria-label="Look-up">' + GUIDE.map(function (x) {
+    var mode = guideMode();
+    S.cFilter = S.cFilter || 'All';
+    var sub = '<div class="chips scroll" role="group" aria-label="Look-up">' + GUIDE.map(function (x) {
       return '<button class="chipbtn" data-act="gmode" data-k="' + x.key + '" aria-pressed="' + (x.key === mode.key) + '">' + x.key + '</button>';
     }).join('') + '</div><label class="sr" for="gq">' + esc(mode.ph) + '</label>' +
-      '<input id="gq" type="search" dir="auto" placeholder="' + esc(mode.ph) + '" value="' + esc(S.guideQ) + '" autocomplete="off" style="margin-top:10px">';
+      '<input id="gq" type="search" dir="auto" placeholder="' + esc(mode.ph) + '" value="' + esc(S.guideQ) + '" autocomplete="off" style="margin-top:10px">' +
+      '<div id="gfilter"></div>';
     frame({ title: 'Guide', tab: 'guide', kicker: 'Style and look-ups', sub: sub });
     var inp = $('#gq');
-    inp.addEventListener('input', function () { S.guideQ = inp.value; clearTimeout(screenGuide._t); screenGuide._t = setTimeout(renderGuideResults, 150); });
-    loading('Opening the ' + mode.key.toLowerCase() + ' document…');
-    try { await loadDoc(mode); } catch (e) { fail(e, screenGuide); return; }
-    renderGuideResults();
+    inp.addEventListener('input', function () {
+      S.guideQ = inp.value; S.expanded = {}; S.limit = 25;
+      clearTimeout(screenGuide._t);
+      screenGuide._t = setTimeout(mode.kind === 'doc' ? renderGuideResults : renderIndexResults, mode.kind === 'corpus' ? 280 : 150);
+    });
+    if (mode.kind === 'doc') {
+      loading('Opening the ' + mode.key.toLowerCase() + ' document…');
+      try { await loadDoc(mode); } catch (e) { fail(e, screenGuide); return; }
+      renderGuideResults();
+      return;
+    }
+    loading('Opening the corpus index…');
+    try {
+      var idx = await corpusIndex();
+      var names = idx.masechtos.map(function (x) { return x.name; });
+      if (S.cFilter !== 'All' && names.indexOf(S.cFilter) < 0) S.cFilter = 'All';
+      $('#gfilter').innerHTML = '<div class="chips scroll" role="group" aria-label="Masechta" style="margin-top:10px">' + ['All'].concat(names).map(function (n) {
+        return '<button class="chipbtn" data-act="cfilter" data-m="' + esc(n) + '" aria-pressed="' + (n === S.cFilter) + '">' + esc(n) + '</button>';
+      }).join('') + '</div>';
+      var want = S.cFilter === 'All' ? names : [S.cFilter];
+      for (var i = 0; i < want.length; i++) {
+        if (mode.kind === 'corpus') await loadCorpus(want[i], function (msg) { loading(msg); });
+        else await loadHeaders(want[i]);
+      }
+    } catch (e) { fail(e, screenGuide); return; }
+    renderIndexResults();
+  }
+  function renderIndexResults() {
+    var mode = guideMode();
+    if (mode.kind === 'doc') return;
+    var idx = S.cidx;
+    if (!idx) return;
+    var names = S.cFilter === 'All' ? idx.masechtos.map(function (x) { return x.name; }) : [S.cFilter];
+    var q = S.guideQ.trim(), limit = S.limit || 25, h = '';
+    if (mode.kind === 'corpus') {
+      var sets = names.map(function (n) { return (S.corp || {})[n] || []; });
+      var phrases = sets.reduce(function (a, b) { return a + b.length; }, 0);
+      if (!q) {
+        setView('<div class="card empty">Type a Hebrew phrase, or English words, to see how it was rendered in the delivered amudim.</div><p class="note">' + phrases.toLocaleString() + ' phrases from ' + esc(names.join(', ')) + '. The same index as the site’s Guide page.</p>');
+        return;
+      }
+      var res = phraseSearch(sets, q);
+      if (!res || !res.groups.length) { setView('<div class="card empty">Nothing found for “' + esc(q) + '”.</div>'); return; }
+      var words = hasHe(q) ? [] : [enNorm(q)];
+      var ex = res.groups.filter(function (g) { return g.exact; });
+      var rest = res.groups.filter(function (g) { return !g.exact; });
+      h += '<p class="note">' + res.total.toLocaleString() + (res.capped ? '+' : '') + ' places in ' + res.groups.length.toLocaleString() + ' renderings.</p>';
+      var card = function (gr) {
+        return '<div class="hit"><div class="txt" style="color:var(--ink);font-size:16px">' + richHtml(gr.rich, gr.eng, words) + '</div>' +
+          '<div class="he" lang="he" dir="rtl" style="font-size:16px;color:var(--ink-2)">' + esc(gr.heb) + '</div>' +
+          '<div class="note">' + gr.hits.length + '×</div>' + citeChips(gr.hits, 'ctx', 'p:' + gr.key) + '</div>';
+      };
+      if (ex.length) h += '<h2 class="sec">Renderings of exactly this phrase</h2><div class="card pad0 hits">' + ex.slice(0, limit).map(card).join('') + '</div>';
+      if (rest.length) h += (ex.length ? '<h2 class="sec">Inside longer phrases</h2>' : '') + '<div class="card pad0 hits">' + rest.slice(0, limit).map(card).join('') + '</div>';
+      if (ex.length > limit || rest.length > limit) h += '<button class="btn ghost block" data-act="morelimit">Show more</button>';
+      setView(h);
+      return;
+    }
+    // headers
+    if (hasHe(q)) { setView('<div class="card empty">Headers are in English. Type English words.</div>'); return; }
+    var hsets = names.map(function (n) { return (S.hdr || {})[n] || []; });
+    var groups = headerSearch(hsets, q);
+    if (!groups.length) { setView('<div class="card empty">No header like “' + esc(q) + '”.</div>'); return; }
+    var max = groups.reduce(function (a, g) { return Math.max(a, g.items.length); }, 1);
+    var nwords = q ? enNorm(q).split(' ') : [];
+    h += '<p class="note">' + (q ? groups.length.toLocaleString() + ' wordings match.' : 'All headers, most used first.') + '</p><div class="card pad0 hits">' + groups.slice(0, limit).map(function (gr) {
+      var kinds = [];
+      if (gr.kinds.o) kinds.push('opens a paragraph ' + gr.kinds.o);
+      if (gr.kinds.m) kinds.push('mid-paragraph ' + gr.kinds.m);
+      if (gr.kinds.s) kinds.push('own line ' + gr.kinds.s);
+      return '<div class="hit"><div class="txt" style="color:var(--ink);font-size:16px;font-weight:600">' + richHtml(gr.rich, gr.text, nwords) + '</div>' +
+        '<div style="display:flex;align-items:center;gap:8px"><div class="bar" style="flex:1;height:8px"><i style="width:' + Math.max(3, Math.round(gr.items.length / max * 100)) + '%;background:var(--gold)"></i></div><span class="note">' + gr.items.length + '×</span></div>' +
+        '<div class="note">' + esc(kinds.join(' · ')) + '</div>' + citeChips(gr.items, 'hctx', 'h:' + gr.key) + '</div>';
+    }).join('') + '</div>';
+    if (groups.length > limit) h += '<button class="btn ghost block" data-act="morelimit">Show more</button>';
+    setView(h);
+  }
+  async function amudLink(m, daf) {
+    S.amudUrl = S.amudUrl || {};
+    var k = m + ' ' + daf;
+    if (S.amudUrl[k] !== undefined) return S.amudUrl[k];
+    try {
+      var it = await g('/drives/' + (await driveId()) + '/root:/' + encodeURIComponent(C.resourcesFolder) + '/Corpus/Amudim/' + encodeURIComponent(m) + '/' + encodeURIComponent(k + '.docx') + '?$select=webUrl');
+      S.amudUrl[k] = it.webUrl;
+    } catch (e) { S.amudUrl[k] = null; }
+    return S.amudUrl[k];
+  }
+  async function openContext(m, i, span, headerText) {
+    var w = $('#sheet');
+    w.innerHTML = '<div class="sheet" role="dialog" aria-modal="true" aria-label="In context"><p class="note">Loading…</p></div>';
+    w.hidden = false;
+    var rows;
+    try { rows = await loadCorpus(m); } catch (e) { w.innerHTML = '<div class="sheet">' + errBox(e) + '<button class="btn ghost block" data-act="closesheet">Close</button></div>'; return; }
+    var r = rows[i];
+    if (!r) { closeSheet(); toast('That place is no longer in the corpus.'); return; }
+    var from = i, to = i + span - 1;
+    for (var a = 0; a < 3 && from > 0 && rows[from - 1].daf === r.daf && rows[from - 1].part === r.part; a++) from--;
+    for (var b = 0; b < 3 && to < rows.length - 1 && rows[to + 1].daf === r.daf && rows[to + 1].part === r.part; b++) to++;
+    var body = '';
+    if (headerText) body += '<div class="ctxrow hl"><span class="eyebrow">Header</span><div>' + esc(headerText) + '</div></div>';
+    for (var k = from; k <= to; k++) {
+      var x = rows[k], on = !headerText && k >= i && k < i + span;
+      body += '<div class="ctxrow' + (on ? ' hl' : '') + '"><div class="he" lang="he" dir="rtl">' + esc(x.heb) + '</div><div>' + richHtml(x.rich, x.eng) + '</div></div>';
+    }
+    var title = m + ' ' + r.daf + (r.part > 1 ? ' (' + r.part + ')' : '');
+    w.innerHTML = '<div class="sheet" role="dialog" aria-modal="true" aria-label="' + esc(title) + ' in context"><h2>' + esc(title) + '</h2>' +
+      (from > 0 && rows[from - 1].daf === r.daf ? '<p class="note">…</p>' : '') + '<div class="ctx">' + body + '</div>' +
+      (to < rows.length - 1 && rows[to + 1].daf === r.daf ? '<p class="note">…</p>' : '') +
+      '<div id="amudlink"></div><button class="btn ghost block" data-act="closesheet">Close</button></div>';
+    var url = await amudLink(m, r.daf);
+    var slot = $('#amudlink');
+    if (slot && url) slot.innerHTML = '<a class="btn block" href="' + esc(url) + '" target="_blank" rel="noopener">Open ' + esc(m + ' ' + r.daf) + '</a>';
   }
   function renderGuideResults() {
-    var mode = GUIDE.filter(function (x) { return x.key === S.guideMode; })[0] || GUIDE[0];
+    var mode = guideMode();
+    if (mode.kind !== 'doc') return;
     var doc = S.docs[mode.key];
     if (!doc) return;
     var q = S.guideQ.trim();
@@ -817,7 +1126,9 @@
       '<nav class="card pad0 navlist" aria-label="More pages">' +
       '<a href="#/deadlines">' + ICON.cal + '<span class="grow">Deadlines</span>' + ICON.chev + '</a>' +
       '<a href="#/graphics">' + ICON.pic + '<span class="grow">Graphics</span>' + ICON.chev + '</a>' +
+      '<a href="#/files">' + ICON.folder + '<span class="grow">Files</span><span class="aside">the team library</span>' + ICON.chev + '</a>' +
       '<a href="#/feedback">' + ICON.pen + '<span class="grow">Feedback</span>' + ICON.chev + '</a>' +
+      '<a href="#/feedback/app">' + ICON.pen + '<span class="grow">Feedback about this app</span>' + ICON.chev + '</a>' +
       '<a href="#/contacts">' + ICON.person + '<span class="grow">Contacts</span>' + ICON.chev + '</a>' +
       '<a href="' + esc(C.chatUrl) + '" target="_blank" rel="noopener">' + ICON.chat + '<span class="grow">Team chat</span><span class="aside">Google Chat</span></a>' +
       '<a href="' + esc(C.siteUrl) + '" target="_blank" rel="noopener">' + ICON.ext + '<span class="grow">Open the full SharePoint site</span></a>' +
@@ -882,11 +1193,16 @@
     setView(h);
   }
 
-  async function screenFeedback() {
+  var APP_CAT = 'Team App';
+  function appChoice(cats) { return cats.filter(function (c) { return /team app|the app|\bapp\b/i.test(c); })[0] || null; }
+  async function screenFeedback(arg) {
     frame({ title: 'Feedback', tab: 'more', back: '#/more', backLabel: 'More' });
     loading();
     var fb = await feedbackList();
-    var cats = fb.cat ? fb.cat.choice.choices : [];
+    var siteCats = fb.cat ? fb.cat.choice.choices : [];
+    var cats = siteCats.slice();
+    if (!appChoice(cats)) cats.unshift(APP_CAT);
+    if (arg === 'app') S.fbCat = appChoice(cats);
     S.fbCat = S.fbCat && cats.indexOf(S.fbCat) > -1 ? S.fbCat : (cats.filter(function (c) { return /general/i.test(c); })[0] || cats[0] || '');
     var h = '<p class="note">Signed with your name. Other team members can’t see your entries.</p>';
     if (cats.length) h += '<span class="lbl">What is it about?</span><div class="chips" role="group" aria-label="Category">' + cats.map(function (c) {
@@ -902,7 +1218,15 @@
     if (!text) { toast('Write something first.'); return; }
     var fb = await feedbackList(), fields = {};
     fields.Title = text.replace(/\s+/g, ' ').slice(0, 80) + (text.length > 80 ? '…' : '');
-    if (fb.cat) fields[fb.cat.name] = S.fbCat;
+    var siteCats = fb.cat ? fb.cat.choice.choices : [];
+    var cat = S.fbCat;
+    if (cat === APP_CAT && siteCats.indexOf(APP_CAT) < 0) {
+      // the list has no app category yet: file it under the website category, marked
+      cat = siteCats.filter(function (c) { return /website/i.test(c); })[0] || siteCats.filter(function (c) { return /general/i.test(c); })[0] || siteCats[0];
+      fields.Title = '[Team App] ' + fields.Title;
+      text = '[Team App] ' + text;
+    }
+    if (fb.cat && cat) fields[fb.cat.name] = cat;
     if (fb.body) fields[fb.body.name] = text;
     else fields.Title = text.slice(0, 255);
     var b = $('[data-act="fbsend"]'); if (b) { b.disabled = true; b.textContent = 'Sending…'; }
@@ -914,6 +1238,73 @@
       if (b) { b.disabled = false; b.textContent = 'Send feedback'; }
       view().insertAdjacentHTML('afterbegin', errBox(e));
     }
+  }
+
+  /* ---------- files: the team library itself ---------- */
+  function fmtSize(n) {
+    if (n == null) return '';
+    if (n < 1024) return n + ' B';
+    if (n < 1048576) return Math.round(n / 1024) + ' KB';
+    return (n / 1048576).toFixed(1) + ' MB';
+  }
+  function fileIcon(name, isFolder) {
+    if (isFolder) return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5H9l2 2.5h8.5A1.5 1.5 0 0 1 21 9v9.5a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18.5z" fill="#f6e6c6" stroke="#7a5c14"/></svg>';
+    var ext = (name.split('.').pop() || '').toLowerCase();
+    var col = /docx?$/.test(ext) ? '#1d3d6b' : /xlsx?|csv/.test(ext) ? '#24552a' : /pdf/.test(ext) ? '#a3271b' : /png|jpe?g|svg|gif|webp/.test(ext) ? '#7b1fa2' : '#5b6470';
+    return '<svg viewBox="0 0 24 24" aria-hidden="true" style="stroke:' + col + '"><path d="M14 3H6.5A1.5 1.5 0 0 0 5 4.5v15A1.5 1.5 0 0 0 6.5 21h11a1.5 1.5 0 0 0 1.5-1.5V8z"/><path d="M14 3v5h5"/></svg>';
+  }
+  function fileRow(x, showPath) {
+    var isF = !!x.folder;
+    var when = x.lastModifiedDateTime ? fmtDate(x.lastModifiedDateTime) : '';
+    var who = x.lastModifiedBy && x.lastModifiedBy.user ? x.lastModifiedBy.user.displayName : '';
+    var meta = isF ? ((x.folder.childCount || 0) + ' items') : [fmtSize(x.size), when, who].filter(Boolean).join(' · ');
+    var path = showPath && x.parentReference && x.parentReference.path ? decodeURIComponent(x.parentReference.path.replace(/^.*root:\/?/, '')) : '';
+    var href = isF ? '#/files/' + encodeURIComponent(((path ? path + '/' : (S.filePath ? S.filePath + '/' : '')) + x.name)) : x.webUrl;
+    return '<a href="' + esc(href) + '"' + (isF ? '' : ' target="_blank" rel="noopener"') + '>' + fileIcon(x.name, isF) +
+      '<span class="grow" style="min-width:0"><span style="display:block;overflow:hidden;text-overflow:ellipsis">' + esc(x.name) + '</span>' +
+      '<span class="aside" style="display:block;font-weight:400">' + esc(path ? path + ' · ' : '') + esc(meta) + '</span></span>' + (isF ? ICON.chev : '') + '</a>';
+  }
+  async function screenFiles(path) {
+    path = (path || '').replace(/^\/+|\/+$/g, '');
+    S.filePath = path;
+    var parts = path ? path.split('/') : [];
+    var crumbs = '<div class="crumbs"><a href="#/files">Library</a>' + parts.map(function (p, k) {
+      return ' › <a href="#/files/' + encodeURIComponent(parts.slice(0, k + 1).join('/')) + '">' + esc(p) + '</a>';
+    }).join('') + '</div>';
+    var sub = '<label class="sr" for="fq">Search the library</label><input id="fq" type="search" placeholder="Search the whole library" value="' + esc(S.fileQ || '') + '" autocomplete="off">';
+    frame({ title: parts.length ? parts[parts.length - 1] : 'Files', tab: 'more', back: parts.length ? '#/files/' + encodeURIComponent(parts.slice(0, -1).join('/')) : '#/more', backLabel: parts.length > 1 ? parts[parts.length - 2] : parts.length ? 'Library' : 'More', refresh: true, sub: sub });
+    var fq = $('#fq');
+    fq.addEventListener('keydown', function (e) { if (e.key === 'Enter') { S.fileQ = fq.value.trim(); runFileSearch(); } });
+    fq.addEventListener('input', function () { S.fileQ = fq.value; clearTimeout(screenFiles._t); screenFiles._t = setTimeout(runFileSearch, 500); });
+    if (S.fileQ && S.fileQ.trim().length > 1) { runFileSearch(); return; }
+    loading();
+    var d = await driveId();
+    var url = path ? '/drives/' + d + '/root:/' + path.split('/').map(encodeURIComponent).join('/') + ':/children' : '/drives/' + d + '/root/children';
+    var items = await gAll(url + '?$top=500&$select=id,name,folder,file,size,webUrl,lastModifiedDateTime,lastModifiedBy');
+    var folders = items.filter(function (x) { return x.folder; }), files = items.filter(function (x) { return !x.folder; });
+    var byName = function (a, b) { return a.name.localeCompare(b.name, undefined, { numeric: true }); };
+    var byNew = function (a, b) { return (b.lastModifiedDateTime || '') < (a.lastModifiedDateTime || '') ? -1 : 1; };
+    folders.sort(byName);
+    files.sort(S.fileSort === 'new' ? byNew : byName);
+    var here = path ? null : S.drive;
+    var h = crumbs + '<div style="display:flex;justify-content:space-between;align-items:center"><span class="note">' + folders.length + ' folders · ' + files.length + ' files</span>' +
+      '<button class="chipbtn" data-act="fsort">' + (S.fileSort === 'new' ? 'Newest first' : 'A–Z') + '</button></div>';
+    h += items.length ? '<div class="card pad0 navlist files">' + folders.concat(files).map(function (x) { return fileRow(x, false); }).join('') + '</div>' : '<div class="card empty">This folder is empty.</div>';
+    var webUrl = here ? here.webUrl : (C.siteUrl + '/Shared Documents/' + path);
+    h += '<p class="note"><a href="' + esc(webUrl) + '" target="_blank" rel="noopener">Open this folder in SharePoint</a> to upload, move or rename.</p>';
+    setView(h);
+  }
+  async function runFileSearch() {
+    var q = (S.fileQ || '').trim();
+    if (currentRoute().indexOf('/files') !== 0) return;
+    if (q.length < 2) { if (!q) screenFiles(S.filePath); return; }
+    loading('Searching…');
+    try {
+      var d = await driveId();
+      var r = await g('/drives/' + d + "/root/search(q='" + encodeURIComponent(q.replace(/'/g, "''")) + "')?$top=60&$select=id,name,folder,file,size,webUrl,lastModifiedDateTime,lastModifiedBy,parentReference");
+      var items = (r.value || []).filter(function (x) { return !/^Archive\b/.test(((x.parentReference && x.parentReference.path) || '').replace(/^.*root:\/?/, '')) || /archive/i.test(q); });
+      setView('<p class="note">' + items.length + ' found for “' + esc(q) + '”.</p>' + (items.length ? '<div class="card pad0 navlist files">' + items.map(function (x) { return fileRow(x, true); }).join('') + '</div>' : ''));
+    } catch (e) { fail(e, runFileSearch); }
   }
 
   /* contacts: the site's own Contacts page, read live */
@@ -978,7 +1369,8 @@
       else if (name === 'more') screenMore();
       else if (name === 'deadlines') await screenDeadlines();
       else if (name === 'graphics') await screenGraphics(arg);
-      else if (name === 'feedback') await screenFeedback();
+      else if (name === 'feedback') await screenFeedback(arg);
+      else if (name === 'files') { if (!arg) S.fileQ = ''; await screenFiles(r.slice(1).map(decodeURIComponent).join('/')); }
       else if (name === 'contacts') await screenContacts();
       else { location.hash = '#/home'; return; }
     } catch (e) {
@@ -987,7 +1379,7 @@
     }
   }
   async function refresh() {
-    S.tracker = null; S.deadlines = null; S.rootKids = null; S.folders = {};
+    S.tracker = null; S.deadlines = null; S.rootKids = null; S.folders = {}; S.cidx = null; S.corp = {}; S.hdr = {}; S.feedback = null;
     await route();
     toast('Up to date');
   }
@@ -1022,7 +1414,13 @@
     if (act === 'tm') { location.hash = '#/tracker/' + encodeURIComponent(el.getAttribute('data-m')); return; }
     if (act === 'gm') { S.graphicsM = el.getAttribute('data-m'); route(); return; }
     if (act === 'dfilter') { S.deadlineFilter = el.getAttribute('data-k'); route(); return; }
-    if (act === 'gmode') { S.guideMode = el.getAttribute('data-k'); route(); return; }
+    if (act === 'gmode') { S.guideMode = el.getAttribute('data-k'); S.expanded = {}; S.limit = 25; route(); return; }
+    if (act === 'cfilter') { S.cFilter = el.getAttribute('data-m'); S.expanded = {}; route(); return; }
+    if (act === 'expand') { S.expanded = S.expanded || {}; S.expanded[el.getAttribute('data-k')] = true; renderIndexResults(); return; }
+    if (act === 'morelimit') { S.limit = (S.limit || 25) + 25; renderIndexResults(); return; }
+    if (act === 'ctx') { openContext(el.getAttribute('data-m'), +el.getAttribute('data-i'), +el.getAttribute('data-span') || 1); return; }
+    if (act === 'hctx') { openContext(el.getAttribute('data-m'), +el.getAttribute('data-i'), 1, el.getAttribute('data-h')); return; }
+    if (act === 'fsort') { S.fileSort = S.fileSort === 'new' ? 'name' : 'new'; route(); return; }
     if (act === 'ghead') { S.guideQ = el.getAttribute('data-t'); var gi = $('#gq'); if (gi) gi.value = S.guideQ; renderGuideResults(); return; }
     if (act === 'fbcat') { S.fbCat = el.getAttribute('data-c'); $$('[data-act="fbcat"]').forEach(function (b) { b.setAttribute('aria-pressed', String(b === el)); }); return; }
     if (act === 'fbsend') { sendFeedback(); return; }
