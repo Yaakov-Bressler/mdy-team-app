@@ -1,0 +1,27 @@
+/* MDY Team App settings. None of these are secrets: the app can only read
+   or change what the signed-in person is already allowed to on the site. */
+window.MDY_CONFIG = {
+  clientId: 'd52a2c56-5fe7-45c3-b64b-ca7894636b0a',
+  tenantId: 'b1c142e7-4b0a-4f5f-a265-0144f240cfe0',
+  siteHost: 'alehzayismdy.sharepoint.com',
+  siteUrl: 'https://alehzayismdy.sharepoint.com',
+  timeZone: 'Asia/Jerusalem',
+  lists: {
+    tracker: 'a3b84530-0e04-4c0c-9b37-c09e1c148337',
+    deadlines: '97d2c140-5a78-45d6-aa0f-12751b213469',
+    feedbackTitle: 'Team Feedback'
+  },
+  masechtos: ['Kerisos', 'Meilah', 'Tamid', 'Midos', 'Kinim', 'Temurah'],
+  prefixes: { Kerisos: 'KER', Meilah: 'MEI', Tamid: 'TAM', Midos: 'MID', Kinim: 'KIN', Temurah: 'TEM' },
+  resourcesFolder: 'Resources',
+  contactsPage: 'Contacts.aspx',
+  chatUrl: 'https://chat.google.com/room/AAQAnjn0HSU?cls=5',
+  graphicsStages: ['Requests', 'Writer Requests', 'Prompts', 'Needs Approval', 'Ready for Review', 'Ready for Designer', 'Ready for Designing', 'Pending Charts', 'Ready to Go', 'Rejected'],
+  /* The site's colour key, one colour per stage */
+  stageColors: {
+    'Open': '#e74c3c', 'Generated': '#ffa040', 'Written': '#ffa040', 'Edited': '#8b6348',
+    'Reviewed': '#9b4f96', 'Run': '#9b4f96', 'Edited 2': '#1a54a8', 'Mevukar': '#7b1fa2',
+    'Kramer': '#607d8b', 'Post Kramer': '#00bcd4', 'Edited 3': '#e91e63', 'Review 2': '#f9e000',
+    'Mevukar 2': '#f9e000', 'Proofread': '#a9db5e', 'Check': '#00695c', 'Final': '#1db954', 'Closed': '#1db954'
+  }
+};
