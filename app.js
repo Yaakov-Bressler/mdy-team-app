@@ -4,7 +4,7 @@
   'use strict';
 
   var C = window.MDY_CONFIG;
-  var SCOPES = ['User.Read', 'Sites.ReadWrite.All', 'Files.ReadWrite.All'];
+  var SCOPES = ['User.Read', 'Sites.ReadWrite.All'];
   var LIGHT = { '#ffa040': 1, '#00bcd4': 1, '#f9e000': 1, '#a9db5e': 1 };
   var BASE = new URL('./', location.href).href;
   var TEST = window.MDY_TEST || null;
