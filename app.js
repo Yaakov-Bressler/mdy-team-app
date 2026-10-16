@@ -1362,6 +1362,7 @@
   async function route() {
     var id = ++routing;
     closeSheet();
+    closeMenu();
     var r = currentRoute().replace(/^\/?/, '').split('/');
     var name = r[0] || 'home', arg = r[1] ? decodeURIComponent(r[1]) : null;
     window.scrollTo(0, 0);
@@ -1394,6 +1395,8 @@
     if (!el) return;
     var act = el.getAttribute('data-act');
     var rowById = function (id) { return (S.tracker || []).filter(function (r) { return r.id === id; })[0]; };
+    if (act === 'menu') { if (window.matchMedia('(max-width: 899px)').matches) { ev.preventDefault(); openMenu(); } return; }
+    if (act === 'closemenu') { closeMenu(); return; }
     if (act === 'retry') { if (retryFn) retryFn(); return; }
     if (act === 'signin') { signIn(); return; }
     if (act === 'signout') { signOut(); return; }
@@ -1450,7 +1453,31 @@
     if (el.id === 'sName') { s.name = el.value.trim(); s.nameTouched = true; var v = $('.summary strong.v'); if (v) v.textContent = s.name || '—'; var b = $('[data-act="send"]'); if (b) b.disabled = !(s.file && s.name && s.parentId); }
     if (el.id === 'sNote') s.note = el.value;
   });
-  document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape' && !$('#sheet').hidden) closeSheet(); });
+  document.addEventListener('keydown', function (ev) {
+    if (ev.key !== 'Escape') return;
+    if (!$('#drawer-wrap').hidden) closeMenu();
+    else if (!$('#sheet').hidden) closeSheet();
+  });
+  function openMenu() {
+    var w = $('#drawer-wrap');
+    $('#drawer-chat').href = C.chatUrl;
+    $('#drawer-site').href = C.siteUrl;
+    $('#drawer-who').textContent = (S.me && S.me.displayName) || '';
+    var base = currentRoute().replace(/^\/?/, '').split('/');
+    $$('.drawer-links a').forEach(function (a) {
+      var h = (a.getAttribute('href') || '').replace(/^#\/?/, '');
+      if (h && (h === base.join('/') || (h === base[0] && h !== 'feedback'))) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
+    });
+    w.hidden = false;
+    requestAnimationFrame(function () { w.classList.add('open'); });
+    var first = $('.drawer-links a', w); if (first) first.focus();
+  }
+  function closeMenu() {
+    var w = $('#drawer-wrap');
+    if (w.hidden) return;
+    w.classList.remove('open');
+    setTimeout(function () { w.hidden = true; }, 200);
+  }
   $('#refresh').addEventListener('click', refresh);
   window.addEventListener('hashchange', route);
 

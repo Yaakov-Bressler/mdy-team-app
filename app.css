@@ -239,3 +239,28 @@ mark { background: #f6e6c6; color: inherit; border-radius: 3px; padding: 0 1px; 
   .tabs a { justify-content: flex-end; padding-bottom: 9px; min-height: 66px; }
   .submit-dot { width: 36px; height: 36px; margin-bottom: 1px; }
 }
+
+/* form fields never inherit the header's white text */
+input, select, textarea { color: var(--ink); }
+input::placeholder, textarea::placeholder { color: #7b8189; }
+
+/* phone menu: a drawer that slides in from the left */
+.drawer-wrap { position: fixed; inset: 0; z-index: 12; }
+.drawer-scrim { position: absolute; inset: 0; border: none; padding: 0; background: rgba(11, 31, 58, .45); opacity: 0; transition: opacity .2s; cursor: pointer; }
+.drawer { position: absolute; top: 0; bottom: 0; left: 0; width: min(300px, 84vw); background: #fff; box-shadow: 0 0 30px rgba(0,0,0,.18); transform: translateX(-100%); transition: transform .2s ease; display: flex; flex-direction: column; padding: calc(14px + var(--safe-t)) 10px calc(14px + var(--safe-b)); overflow-y: auto; }
+.drawer-wrap.open .drawer { transform: none; }
+.drawer-wrap.open .drawer-scrim { opacity: 1; }
+.drawer-head { display: flex; align-items: center; gap: 10px; padding: 4px 6px 4px 8px; font-family: var(--serif); font-size: 20px; font-weight: 700; color: var(--navy); }
+.drawer-head img { width: 34px; height: 34px; border-radius: 9px; }
+.drawer-head .grow { flex: 1; }
+.drawer-x { width: 44px; height: 44px; border: none; background: transparent; border-radius: 999px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+.drawer-x svg { width: 20px; height: 20px; fill: none; stroke: var(--ink); stroke-width: 2.2; stroke-linecap: round; }
+.drawer-who { font-size: 13.5px; color: var(--muted); padding: 0 8px 10px; }
+.drawer-links { display: flex; flex-direction: column; gap: 2px; }
+.drawer-links a, .drawer-links button { display: flex; align-items: center; gap: 14px; min-height: 46px; padding: 0 12px; border: none; border-left: 3px solid transparent; border-radius: 10px; background: transparent; text-decoration: none; color: var(--ink); font-size: 15.5px; font-weight: 600; text-align: left; cursor: pointer; width: 100%; }
+.drawer-links a:hover, .drawer-links button:hover { background: #f7f5f0; }
+.drawer-links a[aria-current="page"] { background: #f5f3ee; border-left-color: var(--gold); color: var(--navy); }
+.drawer-links svg { width: 21px; height: 21px; fill: none; stroke: var(--navy); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.drawer-sep { height: 1px; background: var(--line); margin: 8px 10px; }
+@media (min-width: 900px) { .drawer-wrap { display: none !important; } }
+@media (prefers-reduced-motion: reduce) { .drawer, .drawer-scrim { transition: none; } }
