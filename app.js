@@ -1320,6 +1320,21 @@
     var go = $('#askGo'); if (go) go.disabled = A.busy;
     if (scroll) { var last = log.lastElementChild; if (last) last.scrollIntoView({ block: 'nearest' }); }
   }
+  // A fresh conversation: the New conversation button, and a return to the app after it sat in the background
+  // (a reload or a cold start already begins empty, since the conversation is kept only in memory)
+  function askReset() {
+    if (!S.ask || S.ask.busy) return false;
+    S.ask.convo = []; S.ask.items = []; S.ask.draft = '';
+    renderAsk(false);
+    var aq = $('#askQ'); if (aq) aq.value = '';
+    return true;
+  }
+  var ASK_IDLE_MS = 30 * 60 * 1000, askHiddenAt = 0;
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'hidden') { askHiddenAt = Date.now(); return; }
+    if (askHiddenAt && Date.now() - askHiddenAt >= ASK_IDLE_MS) askReset();
+    askHiddenAt = 0;
+  });
   function askStatus(t) { S.ask.status = t; var el = $('#askStatus'); if (el) el.textContent = t; }
   function screenAsk() {
     frame({ title: 'Ask Claude', tab: 'more', kicker: 'Style, process and the corpus' });
@@ -2088,7 +2103,7 @@
     if (act === 'fbmore') { route(); return; }
     if (act === 'pickfile') { $('#sFile').click(); return; }
     if (act === 'send') { doSend(); return; }
-    if (act === 'asknew') { if (S.ask && !S.ask.busy) { S.ask.convo = []; S.ask.items = []; renderAsk(false); var aq = $('#askQ'); if (aq) aq.focus(); } return; }
+    if (act === 'asknew') { if (askReset()) { var aq = $('#askQ'); if (aq) aq.focus(); } return; }
     if (act === 'asktry') { var tq = el.textContent; if (/…$/.test(tq)) { var at = $('#askQ'); if (at) { at.value = tq.replace(/\s*…$/, ' '); S.ask.draft = at.value; at.focus(); } } else askSubmit(tq); return; }
     if (act === 'again') { S.submit = null; location.hash = '#/submit'; route(); return; }
   });
