@@ -1724,7 +1724,7 @@
     var h = A.items.map(function (it) {
       if (it.k === 'u') return '<div class="ask-m u" dir="auto">' + (it.h || esc(it.t)) + '</div>';
       if (it.k === 'e') return '<div class="ask-m e">' + esc(it.t) + '</div>';
-      return '<div class="ask-who"><span class="ask-av sm" aria-hidden="true">CL</span>Chaim Levy <span class="ask-ai">AI</span></div><div class="ask-m a">' + it.h + '</div>';
+      return '<div class="ask-who"><span class="ask-av sm" aria-hidden="true"><img src="icons/chaim-levy.jpg" alt=""></span>Chaim Levy <span class="ask-ai">AI</span></div><div class="ask-m a">' + it.h + '</div>';
     }).join('');
     if (!A.items.length) h = '<div class="ask-m a"><p>What would you like to know? A few things to try:</p><div class="ask-tries">' +
       ASK_TRIES.map(function (t) { return '<button type="button" class="chipbtn" data-act="asktry">' + esc(t) + '</button>'; }).join('') + '</div></div>';
@@ -1758,7 +1758,7 @@
   function screenAsk() {
     frame({ title: 'Ask Chaim Levy', tab: 'more', kicker: 'AI assistant · style, process and the corpus' });
     var A = S.ask || (S.ask = { convo: [], items: [], busy: false });
-    setView('<div class="ask-id"><span class="ask-av" aria-hidden="true">CL<b>AI</b></span><div><p class="ask-idt">Chaim Levy <span class="ask-ai">AI assistant</span></p>' +
+    setView('<div class="ask-id"><span class="ask-av" aria-hidden="true"><img src="icons/chaim-levy.jpg" alt=""><b>AI</b></span><div><p class="ask-idt">Chaim Levy <span class="ask-ai">AI assistant</span></p>' +
       '<p class="note">Chaim Levy is an AI, not a person on the team. It runs on Claude, searches House Rulings, the Style Guide, the Guidelines and the corpus before it answers, and says where each answer comes from.</p></div></div>' +
       '<div class="ask-log" id="askLog" aria-live="polite"></div>' +
       '<form class="ask-form" id="askForm"><div class="ask-box"><div class="ask-tb" role="toolbar" aria-label="Formatting">' +

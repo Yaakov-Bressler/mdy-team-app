@@ -1,8 +1,8 @@
 /* Keeps the app's own files on the device so it opens fast and offline.
    Team data from SharePoint is never cached here. */
-var VERSION = 'mdy-team-2026-10-18-9';
+var VERSION = 'mdy-team-2026-10-18-10';
 var SHELL = ['./', 'index.html', 'app.css', 'app.js', 'config.js', 'manifest.webmanifest',
-  'vendor/msal-browser.min.js', 'vendor/jszip.min.js', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/favicon.png'];
+  'vendor/msal-browser.min.js', 'vendor/jszip.min.js', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/favicon.png', 'icons/chaim-levy.jpg'];
 
 self.addEventListener('install', function (e) {
   e.waitUntil(caches.open(VERSION).then(function (c) { return c.addAll(SHELL); }).then(function () { return self.skipWaiting(); }));
