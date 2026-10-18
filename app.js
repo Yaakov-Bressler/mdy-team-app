@@ -2262,9 +2262,9 @@
     for (var b = 0; b < 3 && to < rows.length - 1 && rows[to + 1].daf === r.daf && rows[to + 1].part === r.part; b++) to++;
     var body = '';
     var hrow = headerText ? '<div class="ctxrow hl"><span class="eyebrow">' + esc(label || 'Header') + '</span><div>' + esc(headerText) + '</div></div>' : '';
-    if (!atEnd) body += hrow;
     for (var k = from; k <= to; k++) {
       var x = rows[k], on = !headerText && k >= i && k < i + span;
+      if (!atEnd && k === i) body += hrow; /* the header or line sits just before the chunk it opens */
       body += '<div class="ctxrow' + (on ? ' hl' : '') + '"><div class="he" lang="he" dir="rtl">' + esc(x.heb) + '</div><div>' + richHtml(x.rich, x.eng) + '</div></div>';
       if (atEnd && k === i) { body += hrow; break; }
     }
