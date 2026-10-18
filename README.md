@@ -22,6 +22,6 @@ The app is a static page. It signs each person in with Microsoft and talks to th
 - **Deadlines, Feedback:** the site's Deadlines and Team Feedback lists. Feedback stays private to the person who sent it.
 - **Graphics:** the masechta's Graphics stage folders and the pictures in them.
 - **Contacts:** the site's own Contacts page.
-- **Ask Claude:** the same assistant as the site's Ask Claude page, for style, process, edits and corpus reports. Questions go to the team's relay (`askRelay` in `config.js`), which holds the Claude API key and lets in only people signed in with an Aleh Zayis account. The app runs Claude's searches itself, over the rulebooks, the corpus and the transliteration and definitions lists; nothing about people, the tracker or deadlines is sent.
+- **Ask Chaim Levy** (formerly Ask Claude): the AI assistant, the same as the site's Ask Chaim Levy page (`SitePages/Ask-Chaim-Levy.aspx`), runs on Claude, for style, process, edits and corpus reports. Questions go to the team's relay (`askRelay` in `config.js`), which holds the Claude API key and lets in only people signed in with an Aleh Zayis account. The app runs Claude's searches itself, over the rulebooks, the corpus and the transliteration and definitions lists; nothing about people, the tracker or deadlines is sent.
 
 Settings (app registration, list ids) are in `config.js`. None of them are secrets.

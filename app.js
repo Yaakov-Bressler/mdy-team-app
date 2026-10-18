@@ -1094,7 +1094,7 @@
     return { passages: rulePassages, index: ruleIndex, search: searchRules, richText: richText };
   })();
 
-  /* ---------- Ask Claude ----------
+  /* ---------- Ask Chaim Levy (was Ask Claude): the AI assistant ----------
      The same assistant as the site's Ask Claude page. Claude runs behind the team's relay (C.askRelay), which
      holds the API key and Claude's instructions, and lets in only people signed in with an Aleh Zayis account.
      The app runs the four searches Claude asks for, over what the Guide already reads: the rulebooks, the
@@ -1625,7 +1625,7 @@
     var h = A.items.map(function (it) {
       if (it.k === 'u') return '<div class="ask-m u" dir="auto">' + (it.h || esc(it.t)) + '</div>';
       if (it.k === 'e') return '<div class="ask-m e">' + esc(it.t) + '</div>';
-      return '<div class="ask-m a">' + it.h + '</div>';
+      return '<div class="ask-who"><span class="ask-av sm" aria-hidden="true">CL</span>Chaim Levy <span class="ask-ai">AI</span></div><div class="ask-m a">' + it.h + '</div>';
     }).join('');
     if (!A.items.length) h = '<div class="ask-m a"><p>What would you like to know? A few things to try:</p><div class="ask-tries">' +
       ASK_TRIES.map(function (t) { return '<button type="button" class="chipbtn" data-act="asktry">' + esc(t) + '</button>'; }).join('') + '</div></div>';
@@ -1657,10 +1657,10 @@
   var askSelHooked = false, askSyncBtns = null;
   function askStatus(t) { S.ask.status = t; var el = $('#askStatus'); if (el) el.textContent = t; }
   function screenAsk() {
-    frame({ title: 'Ask Claude', tab: 'more', kicker: 'Style, process and the corpus' });
+    frame({ title: 'Ask Chaim Levy', tab: 'more', kicker: 'AI assistant · style, process and the corpus' });
     var A = S.ask || (S.ask = { convo: [], items: [], busy: false });
-    setView('<p class="note">Ask about house style, the editing process, a passage you are editing, or patterns across the delivered volumes. ' +
-      'Claude searches House Rulings, the Style Guide, the Guidelines and the corpus before it answers, and says where each answer comes from.</p>' +
+    setView('<div class="ask-id"><span class="ask-av" aria-hidden="true">CL<b>AI</b></span><div><p class="ask-idt">Chaim Levy <span class="ask-ai">AI assistant</span></p>' +
+      '<p class="note">Chaim Levy is an AI, not a person on the team. It runs on Claude, searches House Rulings, the Style Guide, the Guidelines and the corpus before it answers, and says where each answer comes from.</p></div></div>' +
       '<div class="ask-log" id="askLog" aria-live="polite"></div>' +
       '<form class="ask-form" id="askForm"><div class="ask-box"><div class="ask-tb" role="toolbar" aria-label="Formatting">' +
       '<button type="button" data-c="bold" title="Bold (Ctrl+B)" aria-label="Bold" aria-pressed="false"><b>B</b></button>' +
@@ -1668,7 +1668,7 @@
       '<div class="ask-ed" id="askQ" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Your question" dir="auto" spellcheck="true" ' +
       'data-ph="Ask a question, or paste a passage to check…"></div></div>' +
       '<button class="btn" type="submit" id="askGo">Ask</button></form>' +
-      '<div class="ask-foot"><p class="note">For style, process, edits and corpus reports only. Bold and italics (the B and I buttons, Ctrl+B, Ctrl+I, or pasted from Word) are kept. Answers can be wrong; the rulebooks and the overseeing editor have the final word.</p>' +
+      '<div class="ask-foot"><p class="note">AI-generated answers, for style, process, edits and corpus reports only. Bold and italics (the B and I buttons, Ctrl+B, Ctrl+I, or pasted from Word) are kept. Answers can be wrong; the rulebooks and the overseeing editor have the final word.</p>' +
       '<button type="button" class="btn ghost" data-act="asknew">New conversation</button></div>');
     renderAsk(false);
     var ta = $('#askQ'), fmtBtns = document.querySelectorAll('#askForm .ask-tb button');
@@ -1819,7 +1819,7 @@
     if (mine.length) h += '<p class="note">Amudim from your deadlines that haven’t reached the deadline’s stage, plus any you’ve starred.</p>';
     h += '</div><div class="hg-links"><h2 class="sec">Quick links</h2><div class="card pad0 navlist">' +
       '<a href="#/guide">' + ICON.pen.replace('M4 20l1-4L16 5a2.1 2.1 0 0 1 3 3L8 19z', 'M11 4.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zM16 16l4.5 4.5') + '<span class="grow">Look-ups, phrases and headers</span>' + ICON.chev + '</a>' +
-      '<a href="#/ask">' + ICON.ask + '<span class="grow">Ask Claude</span><span class="aside">style, process, corpus</span>' + ICON.chev + '</a>' +
+      '<a href="#/ask">' + ICON.ask + '<span class="grow">Ask Chaim Levy</span><span class="aside">AI assistant</span>' + ICON.chev + '</a>' +
       '<a href="#/deadlines">' + ICON.cal + '<span class="grow">All deadlines</span>' + ICON.chev + '</a>' +
       '<a href="#/files">' + ICON.folder + '<span class="grow">Files</span>' + ICON.chev + '</a>' +
       '<a href="' + esc(C.chatUrl) + '" target="_blank" rel="noopener">' + ICON.chat + '<span class="grow">Team chat</span>' + ICON.ext + '</a></div></div></div>';
@@ -2013,7 +2013,7 @@
     S.cFilter = S.cFilter || 'All';
     var sub = '<div class="chips scroll" role="group" aria-label="Look-up">' + GUIDE.map(function (x) {
       return '<button class="chipbtn" data-act="gmode" data-k="' + x.key + '" aria-pressed="' + (x.key === mode.key) + '">' + x.key + '</button>';
-    }).join('') + '<a class="chipbtn chip-ask" href="#/ask">' + ICON.ask + 'Ask Claude</a></div><label class="sr" for="gq">' + esc(mode.ph) + '</label>' +
+    }).join('') + '<a class="chipbtn chip-ask" href="#/ask">' + ICON.ask + 'Ask Chaim Levy</a></div><label class="sr" for="gq">' + esc(mode.ph) + '</label>' +
       '<input id="gq" type="search" dir="auto" placeholder="' + esc(mode.ph) + '" value="' + esc(S.guideQ) + '" autocomplete="off" style="margin-top:10px">' +
       '<div id="gfilter"></div>';
     frame({ title: 'Guide', tab: 'guide', kicker: 'Style and look-ups', sub: sub });
@@ -2161,7 +2161,7 @@
     frame({ title: 'More', tab: 'more', kicker: 'MDY Aleh Zayis Team' });
     setView('<div class="card" style="display:flex;align-items:center;gap:12px"><div style="width:46px;height:46px;border-radius:999px;background:var(--navy);color:var(--gold);display:flex;align-items:center;justify-content:center;font-weight:700">' + esc(initials()) + '</div><div><b>' + esc((S.me && S.me.displayName) || '') + '</b><div class="note">Signed in with your Aleh Zayis account</div></div></div>' +
       '<nav class="card pad0 navlist" aria-label="More pages">' +
-      '<a href="#/ask">' + ICON.ask + '<span class="grow">Ask Claude</span><span class="aside">style, process, corpus</span>' + ICON.chev + '</a>' +
+      '<a href="#/ask">' + ICON.ask + '<span class="grow">Ask Chaim Levy</span><span class="aside">AI assistant</span>' + ICON.chev + '</a>' +
       '<a href="#/deadlines">' + ICON.cal + '<span class="grow">Deadlines</span>' + ICON.chev + '</a>' +
       '<a href="#/graphics">' + ICON.pic + '<span class="grow">Graphics</span>' + ICON.chev + '</a>' +
       '<a href="#/files">' + ICON.folder + '<span class="grow">Files</span><span class="aside">the team library</span>' + ICON.chev + '</a>' +
