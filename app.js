@@ -2146,6 +2146,9 @@
       '<button class="btn block" data-act="signin" style="max-width:320px">Sign in</button></div>');
   }
   async function start() {
+    /* Microsoft's silent sign-in renewal loads this page in a hidden frame and reads the answer from its address.
+       The app must not run there: it would consume or overwrite that answer, and renewal (needed daily) would fail. */
+    if (window.self !== window.top) return;
     if ('serviceWorker' in navigator && !TEST && location.protocol === 'https:') {
       navigator.serviceWorker.register('sw.js').catch(function () { /* offline support is optional */ });
     }
