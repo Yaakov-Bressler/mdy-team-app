@@ -16,9 +16,9 @@ Sign in with your Aleh Zayis account. Updates arrive on their own.
 
 The app is a static page. It signs each person in with Microsoft and talks to the team SharePoint site through Microsoft Graph **as that person**, so it can only see or change what they already can on the site. No team data is stored in this repository or anywhere else.
 
-- **Tracker:** reads and updates the Amud Tracker list (any team member can move a stage).
+- **Tracker:** reads and updates the Amud Tracker list (any team member can move a stage). At the top, as on the site's Workflow page, one bar per volume in production (`volumes` in `config.js`), with Final and Closed shown together as Final.
 - **Submit:** uploads the file into the masechta's folder (Editors › your folder by default), named in house form, and moves the amud's stage.
-- **Guide:** reads the Transliteration list, Definitions list, House Rulings and Style Guide live from Resources.
+- **Guide:** reads the Transliteration list, Definitions list, House Rulings and Style Guide live from Resources. Phrases and Headers use the same index as the site's Guide page (Site Assets › MDYLookup), including the English lines with no Hebrew before them (`lines-<masechta>.json`).
 - **Deadlines, Feedback:** the site's Deadlines and Team Feedback lists. Feedback stays private to the person who sent it.
 - **Graphics:** the masechta's Graphics stage folders and the pictures in them.
 - **Contacts:** the site's own Contacts page.

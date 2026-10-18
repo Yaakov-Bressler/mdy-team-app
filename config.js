@@ -16,6 +16,12 @@ window.MDY_CONFIG = {
   resourcesFolder: 'Resources',
   siteAssetsDrive: 'b!-uVDfUf5LEeRULpN1gypU3ud3ezGcDxOi7ykzS1m9EU_rOsoceDARo88MgL_5cmC',
   contactsPage: 'Contacts.aspx',
+  /* Volumes in production, shown at the top of the Tracker as on the site's Workflow page.
+     A volume shows from its 'from' date (Israel time) until every amud in it is Final. */
+  volumes: [
+    { name: 'Kerisos', masechtos: ['Kerisos'], from: '' },
+    { name: 'Meilah volume', sub: 'Meilah \u00b7 Kinim \u00b7 Tamid \u00b7 Midos', masechtos: ['Meilah', 'Kinim', 'Tamid', 'Midos'], from: '2026-10-25' }
+  ],
   /* Ask Claude: the team's relay to the Claude API. It holds the key and checks the person's Aleh Zayis sign-in. */
   askRelay: 'https://mdy-claude.yaakovbressler1.workers.dev/',
   chatUrl: 'https://chat.google.com/room/AAQAnjn0HSU?cls=5',

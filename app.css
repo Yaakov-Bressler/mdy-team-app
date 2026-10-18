@@ -311,3 +311,8 @@ input::placeholder, textarea::placeholder { color: #7b8189; }
   .ask-foot { flex-direction: row; align-items: center; justify-content: space-between; }
 }
 .ask-foot .btn { flex: none; white-space: nowrap; }
+
+/* volume banner on the Tracker (as on the site's Workflow page) */
+.card.vol { margin-bottom: 12px; }
+.volhead { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin-bottom: 10px; }
+.volhead .volcount { margin-left: auto; }

@@ -554,6 +554,50 @@
     }
     return S.hdr[m];
   }
+  /* English with no Hebrew before it (headings, the words that open a paragraph): lines-<m>.json, the same rows as headers
+     ([daf, text, rich, kind, ord, part]); kind o opens its paragraph, s on its own line, t in a table. Site BUILD 2026-10-18-d32bd93. */
+  async function loadLines(m) {
+    S.lines = S.lines || {};
+    if (!S.lines[m]) {
+      var e = (await corpusIndex()).masechtos.filter(function (x) { return x.name === m; })[0];
+      if (!e || !e.lfile) { S.lines[m] = []; return []; }
+      var raw = await assetJson(e.lfile);
+      S.lines[m] = raw.map(function (r) { return { m: m, daf: r[0], text: r[1] || '', rich: Array.isArray(r[2]) ? r[2] : null, kind: r[3], ord: r[4], part: r[5] || 1 }; });
+    }
+    return S.lines[m];
+  }
+  /* English only: grouped by wording; the exact wording first, then one starting with the query, then the query at a word start, then anywhere; most used first inside each */
+  function lineSearch(sets, q, whole) {
+    var nq = enNorm(q || '');
+    if (hasHe(q) || nq.length < 2) return { groups: [], total: 0 };
+    var nk = enKey(q), map = {}, list = [], total = 0;
+    var wre = whole ? new RegExp('(^|[^a-z0-9])' + nq.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?![a-z0-9])') : null;
+    sets.forEach(function (rows) {
+      rows.forEach(function (h) {
+        if (h.ne == null) h.ne = enNorm(h.text);
+        var at;
+        if (wre) { var mm = wre.exec(h.ne); at = mm ? mm.index + mm[1].length : -1; } else at = h.ne.indexOf(nq);
+        if (at < 0) return;
+        total++;
+        var key = enKey(h.text), sc = key === nk ? 3 : at === 0 ? 2 : /[^a-z0-9']/.test(h.ne[at - 1]) ? 1 : 0;
+        var gr = map[key];
+        if (!gr) { gr = map[key] = { key: key, text: h.text, rich: h.rich, items: [], kinds: { o: 0, s: 0, t: 0 }, sc: sc }; list.push(gr); }
+        gr.sc = Math.max(gr.sc, sc); gr.items.push(h);
+        if (gr.kinds[h.kind] != null) gr.kinds[h.kind]++;
+      });
+    });
+    list.sort(function (a, b) { return b.sc - a.sc || b.items.length - a.items.length; });
+    return { groups: list, total: total };
+  }
+  /* a long line cut to about 240 characters around the match, at word breaks */
+  function lineSnip(text, q) {
+    if (text.length <= 260) return { text: text, cut: false };
+    var at = norm(text).indexOf(enNorm(q)), a = 0, b = text.length, c;
+    if (at < 0) at = 0;
+    if (at > 110) { c = text.lastIndexOf(' ', at - 90); if (c > 0) a = c + 1; }
+    if (b - at > 240) { c = text.indexOf(' ', Math.max(at + q.length, a + 240)); if (c > 0) b = c; }
+    return { text: (a ? '… ' : '') + text.slice(a, b) + (b < text.length ? ' …' : ''), cut: a > 0 || b < text.length };
+  }
   function heTok(s) { return norm(s).replace(/[^\u05d0-\u05ea\s]/g, ' ').split(/\s+/).filter(Boolean); }
   function enNorm(s) { return norm(s).replace(/\s+/g, ' ').trim(); }
   function enKey(s) { return enNorm(s).replace(/^[\s.,;:!?"'()\[\]\u2014\u2013-]+|[\s.,;:!?"'()\[\]\u2014\u2013-]+$/g, ''); }
@@ -674,7 +718,7 @@
     var shown = open ? by : by.slice(0, 8);
     var html = shown.map(function (c) {
       var h = c.h;
-      return '<button class="cite" data-act="' + act + '" data-m="' + esc(h.m) + '" data-i="' + (h.i != null ? h.i : h.ord) + '" data-span="' + (h.span || 1) + '"' + (h.text ? ' data-h="' + esc(h.text) + '"' : '') + '>' + esc(c.label) + (c.n > 1 ? ' ×' + c.n : '') + '</button>';
+      return '<button class="cite" data-act="' + act + '" data-m="' + esc(h.m) + '" data-i="' + (h.i != null ? h.i : h.ord) + '" data-span="' + (h.span || 1) + '" data-daf="' + esc(h.daf) + '"' + (h.text ? ' data-h="' + esc(h.text) + '"' : '') + (h.kind && act === 'lctx' ? ' data-kind="' + esc(h.kind) + '"' : '') + '>' + esc(c.label) + (c.n > 1 ? ' ×' + c.n : '') + '</button>';
     }).join('');
     if (by.length > shown.length) html += '<button class="cite more" data-act="expand" data-k="' + esc(keyName) + '">+' + (by.length - shown.length) + ' more</button>';
     return '<div class="cites">' + html + '</div>';
@@ -1519,6 +1563,8 @@
         for (var i = 0; i < want.length; i++) await loadCorpus(want[i], onStatus);
         var res = phraseSearch(want.map(function (m) { return S.corp[m] || []; }), q, true);
         if (!res) return { error: 'The search needs at least two letters.' };
+        for (var li = 0; li < want.length; li++) await loadLines(want[li]).catch(function () { return []; });
+        var lres = lineSearch(want.map(function (m) { return (S.lines || {})[m] || []; }), q, true);
         var per = {}, exact = 0;
         res.groups.forEach(function (gr) { gr.hits.forEach(function (h) { per[h.m] = (per[h.m] || 0) + 1; if (gr.exact) exact++; }); });
         return {
@@ -1529,6 +1575,10 @@
             gr.hits.forEach(function (h) { pm[h.m] = (pm[h.m] || 0) + 1; });
             return { english: askCut(gr.rich ? askPlain(gr.rich) : gr.eng, 700), hebrew: askCut(gr.heb, 400), uses: gr.hits.length,
               per_masechta: pm, whole_chunk_is_the_phrase: gr.exact || undefined, places: askPlaces(gr.hits, 6) };
+          }),
+          english_lines_with_no_hebrew_before_them: lres.total,
+          english_line_samples: lres.groups.slice(0, 10).map(function (gr) {
+            return { english: askCut(gr.rich ? askPlain(gr.rich) : gr.text, 700), uses: gr.items.length, places: askPlaces(gr.items, 4) };
           })
         };
       }
@@ -1884,6 +1934,30 @@
       '</div>';
   }
 
+  /* The site's Workflow page banner: one bar per volume in production, every stage, Final and Closed shown together as Final.
+     A bar shows from its 'from' date (Israel time) until every amud in it is Final, then hides itself (YB, 18 Oct 2026).
+     A one-masechta volume is left out while that masechta is the one in view, since its own card shows the same. */
+  function volumeBanner(rows, inView) {
+    var today = ymdIn(new Date());
+    return (C.volumes || []).map(function (v) {
+      if (v.from && today < v.from) return '';
+      if (v.masechtos.length === 1 && v.masechtos[0] === inView) return ''; /* the masechta's own card below already shows it */
+      var stg = {}, total = 0, done = 0;
+      rows.forEach(function (r) {
+        if (v.masechtos.indexOf(r.masechta) < 0) return;
+        var st = r.stage === 'Closed' ? 'Final' : (r.stage || 'Open');
+        stg[st] = (stg[st] || 0) + 1; total++;
+        if (st === 'Final') done++;
+      });
+      if (!total || done >= total) return '';
+      var order = (S.stages || []).filter(function (s) { return stg[s]; }).concat(Object.keys(stg).filter(function (s) { return (S.stages || []).indexOf(s) < 0; }));
+      return '<section class="card vol" aria-label="' + esc(v.name) + ' by stage"><div class="volhead"><b>' + esc(v.name) + '</b>' + (v.sub ? '<span class="note">' + esc(v.sub) + '</span>' : '') +
+        '<span class="note volcount">' + done + ' of ' + total + ' in Final</span></div>' +
+        '<div class="bar">' + order.map(function (s) { return '<i style="flex:' + stg[s] + ';background:' + stageColor(s) + '" title="' + esc(s + ': ' + stg[s]) + '"></i>'; }).join('') + '</div>' +
+        '<div class="legend">' + order.map(function (s) { return stageChip(s, s + ' ' + stg[s]); }).join('') + '</div></section>';
+    }).join('');
+  }
+
   async function screenTracker(m) {
     var rows = await loadTracker();
     var ms = [];
@@ -1897,10 +1971,10 @@
     frame({ title: 'Tracker', tab: 'tracker', refresh: true, kicker: 'Amud Tracker', sub: chips });
     var shown = rows.filter(function (r) { return r.masechta === m; });
     var counts = {};
-    shown.forEach(function (r) { counts[r.stage] = (counts[r.stage] || 0) + 1; });
+    shown.forEach(function (r) { var st = r.stage === 'Closed' ? 'Final' : r.stage; counts[st] = (counts[st] || 0) + 1; });
     var order = (S.stages || []).filter(function (s) { return counts[s]; }).concat(Object.keys(counts).filter(function (s) { return (S.stages || []).indexOf(s) < 0; }));
-    var done = (counts.Final || 0) + (counts.Closed || 0);
-    var h = '<section class="card" aria-label="Progress"><div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px"><b>' + esc(m) + ' · ' + shown.length + ' rows</b><span class="note">' + done + ' final</span></div>' +
+    var done = counts.Final || 0;
+    var h = volumeBanner(rows, m) + '<section class="card" aria-label="Progress"><div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px"><b>' + esc(m) + ' · ' + shown.length + ' rows</b><span class="note">' + done + ' final</span></div>' +
       '<div class="bar">' + order.map(function (s) { return '<i style="flex:' + counts[s] + ';background:' + stageColor(s) + '" title="' + esc(s) + '"></i>'; }).join('') + '</div>' +
       '<div class="legend">' + order.map(function (s) { return stageChip(s, s + ' ' + counts[s]); }).join('') + '</div></section>';
     h += '<p class="note">Tap an amud to move it to another stage. The star keeps it in My work.</p>';
@@ -2068,7 +2142,7 @@
     frame({ title: 'Guide', tab: 'guide', kicker: 'Style and look-ups', sub: sub });
     var inp = $('#gq');
     inp.addEventListener('input', function () {
-      S.guideQ = inp.value; S.expanded = {}; S.limit = 25;
+      S.guideQ = inp.value; S.expanded = {}; S.limit = 25; S.llimit = 6;
       clearTimeout(screenGuide._t);
       screenGuide._t = setTimeout(mode.kind === 'doc' ? renderGuideResults : renderIndexResults, mode.kind === 'corpus' ? 280 : 150);
     });
@@ -2088,7 +2162,7 @@
       }).join('') + '</div>';
       var want = S.cFilter === 'All' ? names : [S.cFilter];
       for (var i = 0; i < want.length; i++) {
-        if (mode.kind === 'corpus') await loadCorpus(want[i], function (msg) { loading(msg); });
+        if (mode.kind === 'corpus') { await loadCorpus(want[i], function (msg) { loading(msg); }); await loadLines(want[i]).catch(function () { return []; }); }
         else await loadHeaders(want[i]);
       }
     } catch (e) { fail(e, screenGuide); return; }
@@ -2103,17 +2177,35 @@
     var q = S.guideQ.trim(), limit = S.limit || 25, h = '';
     if (mode.kind === 'corpus') {
       var sets = names.map(function (n) { return (S.corp || {})[n] || []; });
-      var phrases = sets.reduce(function (a, b) { return a + b.length; }, 0);
+      var lsets = names.map(function (n) { return (S.lines || {})[n] || []; });
+      var phrases = sets.reduce(function (a, b) { return a + b.length; }, 0), nlines = lsets.reduce(function (a, b) { return a + b.length; }, 0);
       if (!q) {
-        setView('<div class="card empty">Type a Hebrew phrase, or English words, to see how it was rendered in the delivered amudim.</div><p class="note">' + phrases.toLocaleString() + ' phrases from ' + esc(names.join(', ')) + '. The same index as the site’s Guide page.</p>');
+        setView('<div class="card empty">Type a Hebrew phrase, or English words, to see how it was rendered in the delivered amudim. English with no Hebrew before it (a heading, the words that open a paragraph) is searched too.</div><p class="note">' + phrases.toLocaleString() + ' phrases' + (nlines ? ' and ' + nlines.toLocaleString() + ' English-only lines' : '') + ' from ' + esc(names.join(', ')) + '. The same index as the site’s Guide page.</p>');
         return;
       }
-      var res = phraseSearch(sets, q);
-      if (!res || !res.groups.length) { setView('<div class="card empty">Nothing found for “' + esc(q) + '”.</div>'); return; }
+      var res = phraseSearch(sets, q) || { groups: [], total: 0 };
+      var lr = lineSearch(lsets, q);
+      if (!res.groups.length && !lr.groups.length) { setView('<div class="card empty">Nothing found for “' + esc(q) + '”.</div>'); return; }
       var words = hasHe(q) ? [] : [enNorm(q)];
       var ex = res.groups.filter(function (g) { return g.exact; });
       var rest = res.groups.filter(function (g) { return !g.exact; });
-      h += '<p class="note">' + res.total.toLocaleString() + (res.capped ? '+' : '') + ' places in ' + res.groups.length.toLocaleString() + ' renderings.</p>';
+      h += '<p class="note">' + (res.groups.length ? res.total.toLocaleString() + (res.capped ? '+' : '') + ' places in ' + res.groups.length.toLocaleString() + ' renderings' : 'No Hebrew–English phrase') +
+        (lr.total ? ', and ' + lr.total.toLocaleString() + ' line' + (lr.total === 1 ? '' : 's') + ' with no Hebrew before ' + (lr.total === 1 ? 'it' : 'them') : '') + '.</p>';
+      if (lr.groups.length) {
+        var ll = S.llimit || 6, lmax = lr.groups.reduce(function (a, g) { return Math.max(a, g.items.length); }, 1);
+        h += '<h2 class="sec">Lines with no Hebrew before them <small>' + lr.total.toLocaleString() + '</small></h2><div class="card pad0 hits">' + lr.groups.slice(0, ll).map(function (gr) {
+          var kinds = [];
+          if (gr.kinds.o) kinds.push('opens a paragraph ' + gr.kinds.o);
+          if (gr.kinds.s) kinds.push('own line ' + gr.kinds.s);
+          if (gr.kinds.t) kinds.push('in a table ' + gr.kinds.t);
+          var sn = lineSnip(gr.text, q);
+          return '<div class="hit"><div class="txt" style="color:var(--ink);font-size:16px">' + (sn.cut ? hl(sn.text, words) : richHtml(gr.rich, gr.text, words)) + '</div>' +
+            (lr.groups.length > 1 ? '<div style="display:flex;align-items:center;gap:8px"><div class="bar" style="flex:1;height:8px"><i style="width:' + Math.max(3, Math.round(gr.items.length / lmax * 100)) + '%;background:var(--gold)"></i></div><span class="note">' + gr.items.length + '×</span></div>' : '<div class="note">' + gr.items.length + '×</div>') +
+            '<div class="note">' + esc(kinds.join(' · ')) + '</div>' + citeChips(gr.items, 'lctx', 'l:' + gr.key) + '</div>';
+        }).join('') + '</div>';
+        if (lr.groups.length > ll) h += '<button class="btn ghost block" data-act="morelines">Show more lines (' + (lr.groups.length - ll).toLocaleString() + ' more wordings)</button>';
+        if (res.groups.length) h += '<h2 class="sec">Phrases with this wording</h2>';
+      }
       var card = function (gr) {
         return '<div class="hit"><div class="txt" style="color:var(--ink);font-size:16px">' + richHtml(gr.rich, gr.eng, words) + '</div>' +
           '<div class="he" lang="he" dir="rtl" style="font-size:16px;color:var(--ink-2)">' + esc(gr.heb) + '</div>' +
@@ -2154,22 +2246,27 @@
     } catch (e) { S.amudUrl[k] = null; }
     return S.amudUrl[k];
   }
-  async function openContext(m, i, span, headerText) {
+  async function openContext(m, i, span, headerText, dafHint, label) {
     var w = $('#sheet');
     w.innerHTML = '<div class="sheet" role="dialog" aria-modal="true" aria-label="In context"><p class="note">Loading…</p></div>';
     w.hidden = false;
     var rows;
     try { rows = await loadCorpus(m); } catch (e) { w.innerHTML = '<div class="sheet">' + errBox(e) + '<button class="btn ghost block" data-act="closesheet">Close</button></div>'; return; }
+    /* a header or line at the very end of an amud points at the next amud's first chunk: step back into its own amud */
+    var atEnd = false;
+    if (dafHint && rows[i] && rows[i].daf !== dafHint && rows[i - 1] && rows[i - 1].daf === dafHint) { i--; atEnd = true; }
     var r = rows[i];
     if (!r) { closeSheet(); toast('That place is no longer in the corpus.'); return; }
     var from = i, to = i + span - 1;
     for (var a = 0; a < 3 && from > 0 && rows[from - 1].daf === r.daf && rows[from - 1].part === r.part; a++) from--;
     for (var b = 0; b < 3 && to < rows.length - 1 && rows[to + 1].daf === r.daf && rows[to + 1].part === r.part; b++) to++;
     var body = '';
-    if (headerText) body += '<div class="ctxrow hl"><span class="eyebrow">Header</span><div>' + esc(headerText) + '</div></div>';
+    var hrow = headerText ? '<div class="ctxrow hl"><span class="eyebrow">' + esc(label || 'Header') + '</span><div>' + esc(headerText) + '</div></div>' : '';
+    if (!atEnd) body += hrow;
     for (var k = from; k <= to; k++) {
       var x = rows[k], on = !headerText && k >= i && k < i + span;
       body += '<div class="ctxrow' + (on ? ' hl' : '') + '"><div class="he" lang="he" dir="rtl">' + esc(x.heb) + '</div><div>' + richHtml(x.rich, x.eng) + '</div></div>';
+      if (atEnd && k === i) { body += hrow; break; }
     }
     var title = m + ' ' + r.daf + (r.part > 1 ? ' (' + r.part + ')' : '');
     w.innerHTML = '<div class="sheet" role="dialog" aria-modal="true" aria-label="' + esc(title) + ' in context"><h2>' + esc(title) + '</h2>' +
@@ -2506,11 +2603,13 @@
     if (act === 'gm') { S.graphicsM = el.getAttribute('data-m'); route(); return; }
     if (act === 'dfilter') { S.deadlineFilter = el.getAttribute('data-k'); route(); return; }
     if (act === 'gmode') { S.guideMode = el.getAttribute('data-k'); S.expanded = {}; S.limit = 25; route(); return; }
-    if (act === 'cfilter') { S.cFilter = el.getAttribute('data-m'); S.expanded = {}; route(); return; }
+    if (act === 'cfilter') { S.cFilter = el.getAttribute('data-m'); S.expanded = {}; S.llimit = 6; route(); return; }
     if (act === 'expand') { S.expanded = S.expanded || {}; S.expanded[el.getAttribute('data-k')] = true; renderIndexResults(); return; }
     if (act === 'morelimit') { S.limit = (S.limit || 25) + 25; renderIndexResults(); return; }
     if (act === 'ctx') { openContext(el.getAttribute('data-m'), +el.getAttribute('data-i'), +el.getAttribute('data-span') || 1); return; }
-    if (act === 'hctx') { openContext(el.getAttribute('data-m'), +el.getAttribute('data-i'), 1, el.getAttribute('data-h')); return; }
+    if (act === 'hctx') { openContext(el.getAttribute('data-m'), +el.getAttribute('data-i'), 1, el.getAttribute('data-h'), el.getAttribute('data-daf')); return; }
+    if (act === 'lctx') { openContext(el.getAttribute('data-m'), +el.getAttribute('data-i'), 1, el.getAttribute('data-h'), el.getAttribute('data-daf'), { o: 'Opens its paragraph', s: 'On its own line', t: 'In a table' }[el.getAttribute('data-kind')] || 'Line'); return; }
+    if (act === 'morelines') { S.llimit = (S.llimit || 6) + 30; renderIndexResults(); return; }
     if (act === 'fsort') { S.fileSort = S.fileSort === 'new' ? 'name' : 'new'; route(); return; }
     if (act === 'ghead') { S.guideQ = el.getAttribute('data-t'); var gi = $('#gq'); if (gi) gi.value = S.guideQ; renderGuideResults(); return; }
     if (act === 'fbcat') { S.fbCat = el.getAttribute('data-c'); $$('[data-act="fbcat"]').forEach(function (b) { b.setAttribute('aria-pressed', String(b === el)); }); return; }
