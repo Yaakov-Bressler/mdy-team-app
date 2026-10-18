@@ -283,7 +283,14 @@ input::placeholder, textarea::placeholder { color: #7b8189; }
 .ask-tries { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
 .ask-tries .chipbtn { font-weight: 600; text-align: left; height: auto; padding: 7px 14px; line-height: 1.3; flex: 0 1 auto; }
 .ask-form { position: sticky; bottom: calc(76px + var(--safe-b)); z-index: 3; display: flex; gap: 8px; align-items: flex-end; background: var(--ground); padding: 8px 0 4px; }
-.ask-form textarea { flex: 1; min-height: 50px; max-height: 40vh; resize: none; }
+.ask-box { flex: 1; min-width: 0; border: 1px solid #c9c4b8; border-radius: 10px; background: #fff; display: flex; flex-direction: column; }
+.ask-box:focus-within { border-color: var(--navy); box-shadow: 0 0 0 2px rgba(31,58,95,.15); }
+.ask-tb { display: flex; gap: 2px; padding: 4px 6px 0; }
+.ask-tb button { width: 34px; height: 30px; border: 1px solid transparent; background: none; border-radius: 6px; cursor: pointer; color: #5c5650; font-size: 15px; line-height: 1; padding: 0; }
+.ask-tb button:hover { background: #f1ede6; }
+.ask-tb button.on { background: #e6ecf4; border-color: #c5d2e3; color: var(--navy); }
+.ask-ed { font-size: 16px; line-height: 1.45; padding: 4px 12px 10px; min-height: 46px; max-height: 40vh; overflow-y: auto; outline: none; white-space: pre-wrap; overflow-wrap: anywhere; text-align: start; cursor: text; color: var(--ink); }
+.ask-ed:empty::before { content: attr(data-ph); color: #7b8189; pointer-events: none; }
 .ask-form .btn { flex: none; min-height: 50px; }
 .ask-foot { display: flex; flex-direction: column; gap: 10px; }
 .chip-ask { display: inline-flex; align-items: center; gap: 6px; text-decoration: none; }

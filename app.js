@@ -1522,6 +1522,7 @@
     function inline(t) {
       return esc(t)
         .replace(/`([^`]+)`/g, '<code>$1</code>')
+        .replace(/\*\*\*([^*\n]+?)\*\*\*/g, '<strong><em>$1</em></strong>')
         .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
         .replace(/(^|[\s(\[“‘"';>])\*([^*\s][^*]*)\*(?=[\s)\].,;:!?”’"'s&<]|$)/g, '$1<em>$2</em>')
         .replace(/(^|[\s(\[“‘"';>])_([^_\s][^_]*)_(?=[\s)\].,;:!?”’"'s&<]|$)/g, '$1<em>$2</em>');
@@ -1554,9 +1555,75 @@
     return out.join('');
   }
 
+  /* ---- the question box: bold and italics (same code as the site's Ask Claude page, bundle 2026-10-18-821b188). A contenteditable box (not a textarea) so Ctrl+B / Ctrl+I, the B and I buttons,
+     and italics pasted from Word all show; on Ask it is sent to Claude as Markdown (**bold**, *italic*). Only bold and italics
+     survive a paste — fonts, colours, sizes, links and pictures are dropped. ---- */
+  var ASK_SKIP = { STYLE: 1, SCRIPT: 1, META: 1, TITLE: 1, HEAD: 1, LINK: 1, XML: 1, IMG: 1, svg: 1, SVG: 1, TEMPLATE: 1 };
+  var ASK_BLOCK = /^(P|DIV|LI|UL|OL|H[1-6]|TR|TABLE|BLOCKQUOTE|PRE|SECTION|ARTICLE|HEADER|FOOTER)$/;
+  function askRuns(root, fromPaste) {
+    var runs = [];
+    function nl() { var l = runs[runs.length - 1]; if (l && !/\n$/.test(l[0])) runs.push(['\n', false, false]); }
+    function walk(n, b, i) {
+      if (n.nodeType === 3) {
+        var t = n.nodeValue.replace(/\u00a0/g, ' ');
+        if (fromPaste) t = t.replace(/[\r\n\t ]+/g, ' ');
+        if (t) runs.push([t, b, i]);
+        return;
+      }
+      if (n.nodeType !== 1 && n.nodeType !== 11) return;
+      var tag = n.nodeName;
+      if (ASK_SKIP[tag] || /^o:/i.test(tag) && !n.textContent) return;
+      if (tag === 'BR') { runs.push(['\n', false, false]); return; }
+      if (tag === 'B' || tag === 'STRONG') b = true;
+      if (tag === 'I' || tag === 'EM') i = true;
+      if (n.style) {
+        var fw = n.style.fontWeight, fs = n.style.fontStyle;
+        if (fw) b = fw === 'bold' || fw === 'bolder' || parseInt(fw, 10) >= 600;
+        if (fs) i = fs === 'italic' || fs === 'oblique';
+      }
+      var blk = ASK_BLOCK.test(tag);
+      if (blk) nl();
+      for (var c = n.firstChild; c; c = c.nextSibling) walk(c, b, i);
+      if (blk) nl();
+    }
+    walk(root, false, false);
+    var out = [];
+    runs.forEach(function (r) {
+      var l = out[out.length - 1];
+      if (r[0] === '\n') { r = ['\n', false, false]; }
+      if (l && (l[1] === r[1] && l[2] === r[2])) l[0] += r[0]; else out.push(r.slice());
+    });
+    if (fromPaste) out.forEach(function (r) { r[0] = r[0].replace(/ *\n */g, '\n'); });
+    var s = out.map(function (r) { return r[0]; }).join('');
+    var lead = s.length - s.replace(/^\s+/, '').length, tail = s.length - s.replace(/\s+$/, '').length;
+    while (out.length && lead > 0) { var f = out[0]; if (f[0].length <= lead) { lead -= f[0].length; out.shift(); } else { f[0] = f[0].slice(lead); lead = 0; } }
+    while (out.length && tail > 0) { var z = out[out.length - 1]; if (z[0].length <= tail) { tail -= z[0].length; out.pop(); } else { z[0] = z[0].slice(0, z[0].length - tail); tail = 0; } }
+    out.forEach(function (r) { r[0] = r[0].replace(/\n{3,}/g, '\n\n'); });
+    return out;
+  }
+  function askRunsMd(runs) {
+    return runs.map(function (r) {
+      if (!r[1] && !r[2]) return r[0];
+      var mk = r[1] && r[2] ? '***' : r[1] ? '**' : '*';
+      return r[0].split('\n').map(function (line) {
+        var m = line.match(/^(\s*)([\s\S]*?)(\s*)$/);
+        return m[2] ? m[1] + mk + m[2] + mk + m[3] : line;
+      }).join('\n');
+    }).join('');
+  }
+  function askRunsHtml(runs, br) {
+    return runs.map(function (r) {
+      var h = esc(r[0]);
+      if (br) h = h.replace(/\n/g, '<br>');
+      if (r[2]) h = (br ? '<i>' : '<em>') + h + (br ? '</i>' : '</em>');
+      if (r[1]) h = (br ? '<b>' : '<strong>') + h + (br ? '</b>' : '</strong>');
+      return h;
+    }).join('');
+  }
+
   function askLogHtml(A) {
     var h = A.items.map(function (it) {
-      if (it.k === 'u') return '<div class="ask-m u" dir="auto">' + esc(it.t) + '</div>';
+      if (it.k === 'u') return '<div class="ask-m u" dir="auto">' + (it.h || esc(it.t)) + '</div>';
       if (it.k === 'e') return '<div class="ask-m e">' + esc(it.t) + '</div>';
       return '<div class="ask-m a">' + it.h + '</div>';
     }).join('');
@@ -1578,7 +1645,7 @@
     if (!S.ask || S.ask.busy) return false;
     S.ask.convo = []; S.ask.items = []; S.ask.draft = '';
     renderAsk(false);
-    var aq = $('#askQ'); if (aq) aq.value = '';
+    var aq = $('#askQ'); if (aq) aq.innerHTML = '';
     return true;
   }
   var ASK_IDLE_MS = 30 * 60 * 1000, askHiddenAt = 0;
@@ -1587,6 +1654,7 @@
     if (askHiddenAt && Date.now() - askHiddenAt >= ASK_IDLE_MS) askReset();
     askHiddenAt = 0;
   });
+  var askSelHooked = false, askSyncBtns = null;
   function askStatus(t) { S.ask.status = t; var el = $('#askStatus'); if (el) el.textContent = t; }
   function screenAsk() {
     frame({ title: 'Ask Claude', tab: 'more', kicker: 'Style, process and the corpus' });
@@ -1594,26 +1662,72 @@
     setView('<p class="note">Ask about house style, the editing process, a passage you are editing, or patterns across the delivered volumes. ' +
       'Claude searches House Rulings, the Style Guide, the Guidelines and the corpus before it answers, and says where each answer comes from.</p>' +
       '<div class="ask-log" id="askLog" aria-live="polite"></div>' +
-      '<form class="ask-form" id="askForm"><label class="sr" for="askQ">Your question</label>' +
-      '<textarea id="askQ" rows="2" dir="auto" placeholder="Ask a question, or paste a passage to check…">' + esc(A.draft || '') + '</textarea>' +
+      '<form class="ask-form" id="askForm"><div class="ask-box"><div class="ask-tb" role="toolbar" aria-label="Formatting">' +
+      '<button type="button" data-c="bold" title="Bold (Ctrl+B)" aria-label="Bold" aria-pressed="false"><b>B</b></button>' +
+      '<button type="button" data-c="italic" title="Italic (Ctrl+I)" aria-label="Italic" aria-pressed="false"><i>I</i></button></div>' +
+      '<div class="ask-ed" id="askQ" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Your question" dir="auto" spellcheck="true" ' +
+      'data-ph="Ask a question, or paste a passage to check…"></div></div>' +
       '<button class="btn" type="submit" id="askGo">Ask</button></form>' +
-      '<div class="ask-foot"><p class="note">For style, process, edits and corpus reports only. Answers can be wrong; the rulebooks and the overseeing editor have the final word.</p>' +
+      '<div class="ask-foot"><p class="note">For style, process, edits and corpus reports only. Bold and italics (the B and I buttons, Ctrl+B, Ctrl+I, or pasted from Word) are kept. Answers can be wrong; the rulebooks and the overseeing editor have the final word.</p>' +
       '<button type="button" class="btn ghost" data-act="asknew">New conversation</button></div>');
     renderAsk(false);
-    var ta = $('#askQ');
-    ta.addEventListener('input', function () { A.draft = ta.value; });
+    var ta = $('#askQ'), fmtBtns = document.querySelectorAll('#askForm .ask-tb button');
+    if (A.draft) ta.innerHTML = A.draft;
+    try { document.execCommand('styleWithCSS', false, false); } catch (e) {}
+    function syncBtns() {
+      var sel = window.getSelection(), inside = sel && sel.rangeCount && ta.contains(sel.anchorNode);
+      Array.prototype.forEach.call(fmtBtns, function (b) {
+        var on = false;
+        if (inside) { try { on = document.queryCommandState(b.getAttribute('data-c')); } catch (e) {} }
+        b.classList.toggle('on', !!on); b.setAttribute('aria-pressed', on ? 'true' : 'false');
+      });
+    }
+    function fmt(cmd) { ta.focus(); try { document.execCommand(cmd, false, null); } catch (e) {} A.draft = ta.innerHTML; syncBtns(); }
+    function insertClean(dt) {
+      var html = dt.getData('text/html'), text = dt.getData('text/plain');
+      if (html) {
+        var runs = askRuns(new DOMParser().parseFromString(html, 'text/html').body, true);
+        if (runs.length) { document.execCommand('insertHTML', false, askRunsHtml(runs, true)); return; }
+      }
+      if (text) document.execCommand('insertText', false, text.replace(/\r\n?/g, '\n'));
+    }
+    Array.prototype.forEach.call(fmtBtns, function (b) {
+      b.addEventListener('mousedown', function (e) { e.preventDefault(); });
+      b.addEventListener('click', function () { fmt(b.getAttribute('data-c')); });
+    });
+    if (!askSelHooked) { askSelHooked = true; document.addEventListener('selectionchange', function () { if (askSyncBtns) askSyncBtns(); }); }
+    askSyncBtns = function () { if (ta.isConnected) syncBtns(); };
+    ta.addEventListener('paste', function (e) { if (!e.clipboardData) return; e.preventDefault(); insertClean(e.clipboardData); });
+    ta.addEventListener('drop', function (e) {
+      if (!e.dataTransfer) return;
+      e.preventDefault(); ta.focus();
+      var rg = document.caretRangeFromPoint ? document.caretRangeFromPoint(e.clientX, e.clientY) : null;
+      if (rg && ta.contains(rg.startContainer)) { var sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(rg); }
+      insertClean(e.dataTransfer);
+    });
+    ta.addEventListener('input', function () {
+      if (!ta.textContent.replace(/\s/g, '') && ta.innerHTML) ta.innerHTML = '';
+      A.draft = ta.innerHTML;
+    });
     ta.addEventListener('keydown', function (e) {
-      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && window.matchMedia('(min-width: 900px)').matches) { e.preventDefault(); askSubmit(); }
+      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && window.matchMedia('(min-width: 900px)').matches) { e.preventDefault(); askSubmit(); return; }
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey) {
+        var k = (e.key || '').toLowerCase();
+        if (k === 'b') { e.preventDefault(); fmt('bold'); }
+        else if (k === 'i') { e.preventDefault(); fmt('italic'); }
+        else if (k === 'u') { e.preventDefault(); }
+      }
     });
     $('#askForm').addEventListener('submit', function (e) { e.preventDefault(); askSubmit(); });
   }
   async function askSubmit(text) {
-    var A = S.ask, ta = $('#askQ');
-    var q = String(text != null ? text : (ta ? ta.value : '')).trim();
+    var A = S.ask, ta = $('#askQ'), q, uh;
+    if (text != null) { q = String(text).trim(); uh = esc(q); }
+    else { var runs = ta ? askRuns(ta, false) : []; q = askRunsMd(runs).trim(); uh = askRunsHtml(runs, false); }
     if (!q || !A || A.busy) return;
     A.busy = true; A.status = 'Thinking…'; A.draft = '';
-    if (ta) ta.value = '';
-    A.items.push({ k: 'u', t: q });
+    if (ta) { ta.innerHTML = ''; if (askSyncBtns) askSyncBtns(); }
+    A.items.push({ k: 'u', t: q, h: uh });
     renderAsk(true);
     var turn = A.convo.concat([{ role: 'user', content: q }]);
     try {
@@ -2356,7 +2470,7 @@
     if (act === 'pickfile') { $('#sFile').click(); return; }
     if (act === 'send') { doSend(); return; }
     if (act === 'asknew') { if (askReset()) { var aq = $('#askQ'); if (aq) aq.focus(); } return; }
-    if (act === 'asktry') { var tq = el.textContent; if (/…$/.test(tq)) { var at = $('#askQ'); if (at) { at.value = tq.replace(/\s*…$/, ' '); S.ask.draft = at.value; at.focus(); } } else askSubmit(tq); return; }
+    if (act === 'asktry') { var tq = el.textContent; if (/…$/.test(tq)) { var at = $('#askQ'); if (at) { at.textContent = tq.replace(/\s*…$/, ' '); S.ask.draft = at.innerHTML; at.focus(); var sl = window.getSelection(), rg = document.createRange(); rg.selectNodeContents(at); rg.collapse(false); sl.removeAllRanges(); sl.addRange(rg); } } else askSubmit(tq); return; }
     if (act === 'again') { S.submit = null; location.hash = '#/submit'; route(); return; }
   });
   document.addEventListener('change', async function (ev) {
