@@ -1100,7 +1100,7 @@
      The app runs the four searches Claude asks for, over what the Guide already reads: the rulebooks, the
      delivered corpus and its headers, and the transliteration and definitions lists. Nothing about people,
      contacts, the tracker or deadlines is ever sent. */
-  var ASK_MAX_ROUNDS = 8;
+  var ASK_MAX_ROUNDS = 12;
   var ASK_LABEL = { search_rules: 'Searching the rulebooks', search_corpus: 'Searching the delivered volumes',
     search_headers: 'Searching the headers', lookup_terms: 'Checking the transliteration and definitions lists' };
   var ASK_TRIES = ['When do we write “may” and when “can”?', 'How was תא שמע rendered in each masechta?',
@@ -1195,9 +1195,10 @@
   }
 
   /* ---------- Ask Claude: the source texts, the Tanach and the skill instructions (shared by the site and the app) ----------
-     io.json(name)   -> a JSON file from Site Assets/MDYLookup (the sources-*.json files, tanach.json, sources-index.json)
+     io.json(name)   -> a JSON file from Claude/Ask Claude data (the sources-*.json files, tanach.json, sources-index.json)
      io.skills()     -> [{ name: 'mdy-writer/house-voice.md', id: <anything io.text understands> }] from Claude/skills
      io.text(id)     -> that file's text
+     io.ledger()     -> the text of Claude/Ledger/rulings.jsonl (settled rulings and open questions)
      Same code in mdy-lookup (SharePoint) and the MDY Team app; keep the two copies identical. */
   var ASKX = (function () {
     var MARKS = /[֑-ׇֽֿׁׂׅׄ]/g;
@@ -1227,6 +1228,17 @@
       mesivta: 'Mesivta (Oz VeHadar) biur column, OCR of the scan: expect occasional letter confusions; never use it as evidence for nikkud.',
       mesivta_hearos: "Mesivta he'aros (the numbered notes under the line), OCR. Reference only: never fold them into an elucidation."
     };
+    /* where each instruction document sits in the authority order of rulings.md § Authority hierarchy */
+    function standing(name) {
+      var n = String(name).toLowerCase();
+      if (/^ledger\//.test(n)) return 'Ledger ruling (level 3: settled by a senior editor, dated; a later ruling beats an earlier document)';
+      if (/rulings\.md$|chat-rulings|handback-replies/.test(n)) return 'Level 3: senior editors\' settled decisions (rulings.md is canonical)';
+      if (/style-guide|terminology|phrase-book|definitions\.md|pshat-checklist/.test(n)) return 'Level 6: the style guide and its satellites';
+      if (/^mdy-proofreader\//.test(n)) return 'Proofreading rules (the proofreader\'s pass; the Transliteration List outranks her habits)';
+      if (/^mdy-graphics\//.test(n)) return 'Graphics instructions';
+      if (/^mdy-writer\//.test(n)) return 'Writer guidance, drawn from the rulings and the delivered Finals';
+      return 'Editor guidance';
+    }
 
     return function make(io) {
       var IX = null, FILES = {}, TAN = null, SK = null;
@@ -1250,7 +1262,7 @@
         if (!T) return { error: m.masechta + ' has no ' + kind + ' text in the library.', available: Object.keys(d.texts) };
         var a = amudKey(input.amud), body = T.amudim[a];
         if (body == null) return { error: m.masechta + ' ' + kind + ' has no amud ' + (input.amud || '') + '.', range: Object.keys(T.amudim)[0] + '–' + Object.keys(T.amudim).slice(-1)[0] };
-        var out = { masechta: m.masechta, amud: a, text: kind, about: NOTE[kind] };
+        var out = { masechta: m.masechta, amud: a, text: kind, about: NOTE[kind] + (m.text_kind === 'derived' && kind === 'gemara' ? ' For this masechta the text is derived from the delivered English master, so it follows the delivered edition, not the Vilna daf.' : '') };
         if (input.query) {
           var q = hnorm(input.query), paras = body.split(/\n+/).filter(function (p) { return hnorm(p).indexOf(q) >= 0; });
           out.query = input.query;
@@ -1336,10 +1348,27 @@
         if (SK) return SK;
         SK = (async function () {
           var list = await io.skills();
+          var led = [];
+          if (io.ledger) {
+            try {
+              String(await io.ledger()).split(/\n/).forEach(function (l) {
+                if (!l.trim()) return;
+                try { led.push(JSON.parse(l)); } catch (e) { /* skip a bad line */ }
+              });
+            } catch (e) { led = []; }
+          }
           var docs = await Promise.all(list.map(async function (f) {
             try { return { name: f.name, text: String(await io.text(f.id)) }; } catch (e) { return null; }
           }));
           docs = docs.filter(Boolean);
+          if (led.length) {
+            docs.push({ name: 'ledger/rulings.jsonl', ledger: true,
+              text: led.map(function (r) {
+                return '## ' + [r.id, r.kind, r.status, r.authority, r.date, 'scope ' + r.scope].filter(Boolean).join(' · ') + '\n' +
+                  [r.heb ? 'Hebrew: ' + r.heb : '', r.en ? 'Rendering: ' + r.en : '', r.was ? 'Retired: ' + r.was : '', r.rule ? 'Rule: ' + r.rule : '',
+                   r.supersedes ? 'Supersedes: ' + r.supersedes : '', r.why ? 'Why: ' + r.why : '', r.source ? 'Source: ' + r.source : ''].filter(Boolean).join('\n');
+              }).join('\n\n') });
+          }
           docs.forEach(function (d) {
             var secs = [], cur = { path: [], start: 0, lines: [] }, stack = [];
             d.text.split(/\n/).forEach(function (line) {
@@ -1375,36 +1404,38 @@
             var sc = 0;
             terms.forEach(function (w) { var i = -1, c = 0; while ((i = s.n.indexOf(w, i + 1)) >= 0 && c < 6) c++; sc += c ? 1 + Math.log(c) : 0; });
             if (!sc) return;
-            if (terms.length > 1 && s.n.indexOf(q) >= 0) sc += 3;
+            if (terms.length > 1 && s.n.indexOf(q) >= 0) sc += 8;
             if (hnorm(s.path.join(' ')).indexOf(q) >= 0) sc += 2;
+            if (d.ledger) sc *= 1.5;
+            else if (/rulings\.md$/.test(d.name)) sc *= 1.25;
             scored.push({ d: d, s: s, sc: sc });
           });
         });
         scored.sort(function (a, b) { return b.sc - a.sc; });
         var lim = num(input.limit, 1, 12, 6);
         return {
-          searched: docs.length + ' instruction documents (Claude/skills)', sections_matched: scored.length,
+          searched: docs.length + ' documents (Claude/skills, plus the ruling ledger)', sections_matched: scored.length,
           results: scored.slice(0, lim).map(function (h) {
             var body = h.s.body, at = hnorm(body).indexOf(terms[0]);
             var start = 0;
             if (at > 600) { var raw = body.toLowerCase().indexOf(terms[0]); start = raw > 400 ? raw - 400 : 0; }
-            return { doc: h.d.name, section: h.s.path.join(' › ') || '(top)', text: (start ? '…' : '') + cut(body.slice(start), 1600) };
+            return { doc: h.d.name, standing: standing(h.d.name), section: h.s.path.join(' › ') || '(top)', text: (start ? '…' : '') + cut(body.slice(start), 1600) };
           })
         };
       }
       async function readInstructions(input) {
         var docs = await skills();
-        if (!input.doc) return { documents: docs.map(function (d) { return d.name; }) };
+        if (!input.doc) return { documents: docs.map(function (d) { return { doc: d.name, standing: standing(d.name), sections: d.sections.length }; }) };
         var d = docMatch(docs, input.doc);
         if (!d) return { error: 'No instruction document called "' + input.doc + '".', documents: docs.map(function (x) { return x.name; }) };
         if (input.section) {
           var w = hnorm(input.section);
           var hits = d.sections.filter(function (s) { return hnorm(s.path.join(' ')).indexOf(w) >= 0; });
           if (!hits.length) return { error: 'No section matching "' + input.section + '" in ' + d.name + '.', sections: d.sections.map(function (s) { return s.path.join(' › '); }).filter(Boolean) };
-          return { doc: d.name, sections: hits.slice(0, 4).map(function (s) { return { section: s.path.join(' › '), text: cut(s.body, 8000) }; }) };
+          return { doc: d.name, standing: standing(d.name), sections: hits.slice(0, 4).map(function (s) { return { section: s.path.join(' › '), text: cut(s.body, 8000) }; }) };
         }
         var size = 10000, parts = Math.max(1, Math.ceil(d.text.length / size)), p = num(input.part, 1, parts, 1);
-        var out = { doc: d.name, part: p, parts: parts, content: d.text.slice((p - 1) * size, p * size) };
+        var out = { doc: d.name, standing: standing(d.name), part: p, parts: parts, content: d.text.slice((p - 1) * size, p * size) };
         if (p === 1) out.sections = d.sections.map(function (s) { return s.path.join(' › '); }).filter(Boolean).slice(0, 80);
         if (parts > p) out.note = 'Part ' + p + ' of ' + parts + '. Ask for a section by name, or part ' + (p + 1) + '.';
         return out;
@@ -1412,14 +1443,28 @@
 
       return {
         labels: { read_source: 'Reading the source texts', search_sources: 'Searching the Gemara, Rashi and Mesivta', lookup_pasuk: 'Looking up the pasuk',
-          search_instructions: 'Searching the skill instructions', read_instructions: 'Reading the skill instructions' },
+          search_instructions: 'Searching the skill instructions and rulings', read_instructions: 'Reading the skill instructions' },
         tools: { read_source: readSource, search_sources: searchSources, lookup_pasuk: lookupPasuk, search_instructions: searchInstructions, read_instructions: readInstructions }
       };
     };
   })();
 
+  /* the source texts and Tanach for Ask Claude live in Claude/Ask Claude data (documents library); cached by eTag like the corpus */
+  var ASK_DATA = {};
+  function askData(name) {
+    if (TEST) return TEST.asset(name);
+    return ASK_DATA[name] || (ASK_DATA[name] = (async function () {
+      var item = await g('/drives/' + (await driveId()) + '/root:/Claude/Ask Claude data/' + encodeURIComponent(name));
+      var tag = item.eTag || item.lastModifiedDateTime, key = 'askdata:' + name;
+      var hit = await idbGet(key);
+      if (hit && hit.tag === tag) return hit.data;
+      var data = await (await fetch(item['@microsoft.graph.downloadUrl'])).json();
+      idbPut(key, { tag: tag, data: data });
+      return data;
+    })().catch(function (e) { delete ASK_DATA[name]; throw e; }));
+  }
   var ASKX_APP = ASKX({
-    json: function (name) { return assetJson(name); },
+    json: function (name) { return askData(name); },
     skills: async function () {
       var d = await driveId(), out = [];
       var dirs = await gAll('/drives/' + d + '/root:/Claude/skills:/children?$select=id,name,folder&$top=200');
@@ -1433,6 +1478,10 @@
     text: async function (f) {
       var url = f['@microsoft.graph.downloadUrl'] || (await g('/drives/' + (await driveId()) + '/items/' + f.id))['@microsoft.graph.downloadUrl'];
       return (await fetch(url)).text();
+    },
+    ledger: async function () {
+      var it = await g('/drives/' + (await driveId()) + '/root:/Claude/Ledger/rulings.jsonl');
+      return (await fetch(it['@microsoft.graph.downloadUrl'], { cache: 'no-store' })).text();
     }
   });
   Object.keys(ASKX_APP.labels).forEach(function (k) { ASK_LABEL[k] = ASKX_APP.labels[k]; });
