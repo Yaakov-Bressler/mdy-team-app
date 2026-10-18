@@ -16,6 +16,8 @@ window.MDY_CONFIG = {
   resourcesFolder: 'Resources',
   siteAssetsDrive: 'b!-uVDfUf5LEeRULpN1gypU3ud3ezGcDxOi7ykzS1m9EU_rOsoceDARo88MgL_5cmC',
   contactsPage: 'Contacts.aspx',
+  /* Ask Claude: the team's relay to the Claude API. It holds the key and checks the person's Aleh Zayis sign-in. */
+  askRelay: 'https://mdy-claude.yaakovbressler1.workers.dev/',
   chatUrl: 'https://chat.google.com/room/AAQAnjn0HSU?cls=5',
   graphicsStages: ['Requests', 'Writer Requests', 'Prompts', 'Needs Approval', 'Ready for Review', 'Ready for Designer', 'Ready for Designing', 'Pending Charts', 'Ready to Go', 'Rejected'],
   /* The site's colour key, one colour per stage */

@@ -69,6 +69,7 @@
     pen: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20l1-4L16 5a2.1 2.1 0 0 1 3 3L8 19z"/></svg>',
     person: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg>',
     chat: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z"/></svg>',
+    ask: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z"/><path d="M12 7.5l1 2.1 2.2.9-2.2.9-1 2.1-1-2.1-2.2-.9 2.2-.9z"/></svg>',
     folder: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5H9l2 2.5h8.5A1.5 1.5 0 0 1 21 9v9.5a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18.5z"/></svg>',
     ext: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>',
     out: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-4M10 16l-4-4 4-4M6 12h10"/></svg>',
@@ -478,7 +479,7 @@
     { key: 'Spelling', kind: 'doc', match: /translit/i, ph: 'Hebrew or English word', table: true },
     { key: 'Phrases', kind: 'corpus', ph: 'How was this phrase rendered?' },
     { key: 'Headers', kind: 'headers', ph: 'Which header was used?' },
-    { key: 'Definitions', kind: 'doc', match: /definition/i, ph: 'Look up a term', table: true },
+    { key: 'Definitions', kind: 'doc', match: /definition/i, ph: 'Look up a term', table: false },   // plain paragraphs: "term (definition)"
     { key: 'Rulings', kind: 'doc', match: /rulings/i, ph: 'What’s our rule on…', table: false },
     { key: 'Style', kind: 'doc', match: /style guide/i, ph: 'Search the Style Guide', table: false }
   ];
@@ -569,7 +570,8 @@
     if (!rich) return hl(text, words || []);
     return rich.map(function (seg) { var t = hl(seg[0], words || []); return seg[1] ? '<em>' + t + '</em>' : t; }).join('');
   }
-  function phraseSearch(sets, q) {
+  /* whole: whole words only (Ask Claude), rather than completing the last word as it is typed */
+  function phraseSearch(sets, q, whole) {
     var groups = {}, list = [], total = 0, CAP = 6000;
     function add(rows, i, span, exact) {
       if (total >= CAP) return;
@@ -589,7 +591,7 @@
     if (hasHe(q)) {
       var qt = heTok(q);
       if (!qt.length) return null;
-      var n = qt.length, partialLast = n > 1 ? true : qt[0].length >= 2;
+      var n = qt.length, partialLast = whole ? false : n > 1 ? true : qt[0].length >= 2;
       sets.forEach(function (rows) {
         for (var i = 0; i < rows.length && total < CAP; i++) {
           var r = rows[i];
@@ -615,16 +617,18 @@
       var nq = enNorm(q);
       if (nq.length < 2) return null;
       var multi = nq.indexOf(' ') > -1;
+      var wre = whole ? new RegExp('(^|[^a-z0-9])' + nq.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?![a-z0-9])') : null;
+      var find = function (hay) { if (!wre) return hay.indexOf(nq); var m = wre.exec(hay); return m ? m.index + m[1].length : -1; };
       sets.forEach(function (rows) {
         for (var i = 0; i < rows.length && total < CAP; i++) {
           var r = rows[i];
           if (r.ne == null) r.ne = enNorm(r.eng);
-          if (r.ne.indexOf(nq) > -1) { add(rows, i, 1, enKey(r.eng) === enKey(q)); continue; }
+          if (find(r.ne) > -1) { add(rows, i, 1, enKey(r.eng) === enKey(q)); continue; }
           if (!multi) continue;
           var nr = rows[i + 1];
           if (!nr || nr.daf !== r.daf || nr.part !== r.part) continue;
           if (nr.ne == null) nr.ne = enNorm(nr.eng);
-          var both = r.ne + ' ' + nr.ne, at = both.indexOf(nq);
+          var both = r.ne + ' ' + nr.ne, at = find(both);
           if (at > -1 && at < r.ne.length) add(rows, i, 2, false);
         }
       });
@@ -731,6 +735,653 @@
     return hits.slice(0, 60);
   }
 
+  /* ---------- the rulebooks search: the same engine as the site's "What's our rule on…?" (MDY Lookup) ----------
+     Copied from mdy-lookup build 2026-10-18-45c8746, so Ask Claude finds the same passages in the app as on the site. */
+  var RULES = (function () {
+
+    var ENT = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
+    function unesc(s) {
+      return s.replace(/&(#x[0-9a-f]+|#\d+|\w+);/gi, function (m, g) {
+        if (g[0] === '#') return String.fromCodePoint(g[1] === 'x' || g[1] === 'X' ? parseInt(g.slice(2), 16) : parseInt(g.slice(1), 10));
+        return ENT[g] != null ? ENT[g] : m;
+      });
+    }
+
+    var RE_P = /<w:p[ >][\s\S]*?<\/w:p>/g;
+    var RE_R = /<w:r[ >][\s\S]*?<\/w:r>/g;
+    var RE_T = /<w:t(?:\s[^>]*)?\/>|<w:t(?:\s[^>]*)?>([\s\S]*?)<\/w:t>/g;
+
+    function paraText(p) {
+      var s = '', m; RE_T.lastIndex = 0;
+      while ((m = RE_T.exec(p))) s += m[1] || '';
+      return unesc(s);
+    }
+    function isItalic(run) {
+      var m = /<w:i(?:\s+w:val="([^"]*)")?\s*\/>/.exec(run);
+      return !!m && !(m[1] === '0' || m[1] === 'false' || m[1] === 'off');
+    }
+    function richText(r) { return r.map(function (s) { return s[0]; }).join(''); }
+
+
+    var FINALS = { 'ך': 'כ', 'ם': 'מ', 'ן': 'נ', 'ף': 'פ', 'ץ': 'צ' };
+    function hebWord(w) {
+      return w.replace(/[^א-ת]/g, '').replace(/[ךםןףץ]/g, function (c) { return FINALS[c]; });
+    }
+    function loose(w) { return w.length > 2 ? w[0] + w.slice(1).replace(/[וי]/g, '') : w; }
+    function engNorm(s) {
+      return String(s || '').normalize('NFKD').replace(/[̀-ͯ]/g, '')
+        .replace(/[‘’ʼ`´]/g, "'").replace(/[“”]/g, '"').toLowerCase();
+    }
+
+    var RULE_SKIP = /^(start here|notes to claude|open questions from claude|recent changes|search words|introductory notes)$/i;
+    var RULE_STOP = {};
+    ('a an the of to in on for and or but nor is are was were be been being am do does did done doing we our ours us you your i me my mine ' +
+     'it its this that these those what whats which who whom whose when whens where wheres why how hows should would could must shall will ' +
+     'there theres their they them he him his she her with without from by as at about into onto than then so if any some all each every ' +
+     'rule rules ruling rulings ruled house mdy our use used uses using write writes written wrote writing get gets got go goes going ' +
+     'dont doesnt isnt arent wasnt cant wont shouldnt also just only very really please tell know want need way ok okay thing things one ones ' +
+     'say ask') .split(' ').forEach(function (w) { RULE_STOP[w] = 1; });
+    /* "say" and "ask" are stop words only as the frame of a question ("how do we say…"); as the subject
+       they come back through the word groups (said/says, asked/challenged), which look at the raw word. */
+    var RULE_FRAME = { say: 1, ask: 1 };
+
+    var HEBC = '\\u0591-\\u05C7\\u05D0-\\u05EA\\u05F0-\\u05F4';
+    var RULE_WORD = new RegExp('[A-Za-z\\u00C0-\\u024F0-9]+(?:[’\'\\-][A-Za-z\\u00C0-\\u024F0-9]+)*|[' + HEBC + ']+(?:["״׳\'][' + HEBC + ']+)*', 'g');
+
+    function ruleStem(w) {
+      if (w.length <= 3) return w;
+      if (/ies$/.test(w) && w.length > 4) w = w.slice(0, -3) + 'y';
+      else if (/(sses|shes|ches|xes|zes)$/.test(w)) w = w.slice(0, -2);
+      else if (/s$/.test(w) && !/(ss|us|is|os)$/.test(w)) w = w.slice(0, -1);
+      if (/ing$/.test(w) && w.length > 5) { w = w.slice(0, -3); if (/([^aeiouls])\1$/.test(w)) w = w.slice(0, -1); }
+      else if (/ed$/.test(w) && w.length > 4) { w = w.slice(0, -2); if (/([^aeiouls])\1$/.test(w)) w = w.slice(0, -1); }
+      if (/ization$/.test(w)) w = w.slice(0, -7);
+      else if (/ation$/.test(w) && w.length > 8) w = w.slice(0, -5);
+      else if (/i[sz]e?$/.test(w) && w.length > 7) w = w.replace(/i[sz]e?$/, 'i');
+      else if (/ly$/.test(w) && w.length > 5) w = w.slice(0, -2);
+      if (/e$/.test(w) && w.length > 4) w = w.slice(0, -1);
+      if (/ic?i$/.test(w) && w.length > 6) w = w.replace(/i$/, '');
+      return w;
+    }
+    function ruleNorm(word) {
+      if (/[א-ת]/.test(word)) return hebWord(word);
+      var w = engNorm(word).replace(/[’'\-]/g, '');
+      return /^[0-9]+$/.test(w) ? w : ruleStem(w);
+    }
+    /* [{n: normalised, w: surface lower-case, s, e}] */
+    function ruleToks(text) {
+      var out = [], m; RULE_WORD.lastIndex = 0;
+      while ((m = RULE_WORD.exec(text))) {
+        var n = ruleNorm(m[0]);
+        if (n) out.push({ n: n, w: m[0].toLowerCase(), s: m.index, e: m.index + m[0].length });
+      }
+      return out;
+    }
+
+    /* rich text with bold: [[text, italic, bold]] */
+    function ruleRich(p) {
+      var segs = [], m; RE_R.lastIndex = 0;
+      while ((m = RE_R.exec(p))) {
+        var run = m[0], t = paraText(run);
+        if (/<w:tab\s*\/>/.test(run)) t = t + ' ';
+        if (/<w:br\s*\/>/.test(run)) t = t + ' ';
+        if (!t) continue;
+        var it = isItalic(run), b = /<w:b(?:\s+w:val="(?!0|false|off)[^"]*")?\s*\/>/.test(run);
+        var last = segs[segs.length - 1];
+        if (last && ((last[1] === it && last[2] === b) || !t.trim())) last[0] += t;
+        else segs.push([t, it, b]);
+      }
+      return segs;
+    }
+
+    /* docx -> blocks in order: {k:'p', style, rich, text} or {k:'tbl', rows:[[cellText]]} */
+    function ruleBlocks(xml) {
+      var body = (/<w:body>([\s\S]*)<\/w:body>/.exec(xml) || [0, xml])[1];
+      var re = /<w:tbl[ >][\s\S]*?<\/w:tbl>|<w:p[ >][\s\S]*?<\/w:p>|<w:p\/>/g, m, out = [];
+      while ((m = re.exec(body))) {
+        var x = m[0];
+        if (/^<w:tbl/.test(x)) {
+          var rows = (x.match(/<w:tr[ >][\s\S]*?<\/w:tr>/g) || []).map(function (tr) {
+            return (tr.match(/<w:tc[ >][\s\S]*?<\/w:tc>/g) || []).map(function (tc) {
+              return (tc.match(RE_P) || []).map(function (p) { return richText(ruleRich(p)); }).join(' ').trim();
+            });
+          });
+          out.push({ k: 'tbl', rows: rows });
+        } else {
+          var st = (/<w:pStyle w:val="([^"]+)"/.exec(x) || [0, ''])[1];
+          var rich = ruleRich(x);
+          out.push({ k: 'p', style: st, rich: rich, text: richText(rich).replace(/\s+/g, ' ').trim() });
+        }
+      }
+      return out;
+    }
+    function headLevel(style) {
+      if (/^title$/i.test(style)) return 0;
+      var h = /heading\s*([1-6])/i.exec(style);
+      return h ? +h[1] : -1;
+    }
+
+    /* One document -> passages, plus word groups when it carries a Search words table. */
+    function rulePassages(xml, doc) {
+      var blocks = ruleBlocks(xml), path = [], out = [], groups = [], lead = null, last = null;
+      for (var i = 0; i < blocks.length; i++) {
+        var b = blocks[i], top = path[0] || '';
+        if (b.k === 'tbl') {
+          last = null; lead = null;
+          if (/^search words$/i.test(top)) {
+            b.rows.slice(1).forEach(function (r) {
+              var words = [];
+              r.forEach(function (c) { c.split(/[,;\/]/).forEach(function (w) { w = w.replace(/^[\s"“”]+|[\s"“”.]+$/g, ''); if (w && w !== '-') words.push(w); }); });
+              if (words.length > 1) groups.push(words);
+            });
+            continue;
+          }
+          if (RULE_SKIP.test(top)) continue;
+          var head = b.rows[0] || [];
+          b.rows.slice(1).forEach(function (r) {
+            var cells = r.filter(function (c) { return c && c !== '-'; });
+            if (!cells.length) return;
+            var t = r.map(function (c, j) { return c && c !== '-' ? (head[j] ? head[j] + ': ' : '') + c : ''; }).filter(Boolean).join(' · ');
+            out.push({ doc: doc, path: path.slice(), rich: [[t, false, false]], text: t });
+          });
+          continue;
+        }
+        var lv = headLevel(b.style);
+        if (lv === 0) continue;
+        if (lv > 0) { path = path.slice(0, lv - 1); while (path.length < lv - 1) path.push(''); path.push(b.text); lead = null; last = null; continue; }
+        if (!b.text || /claudestamp/i.test(b.style)) continue;
+        if (RULE_SKIP.test(path[0] || '')) continue;
+        if (/example/i.test(b.style) && last) { last.ex = (last.ex || []).concat([b.rich]); continue; }
+        var bullet = /list/i.test(b.style);
+        var ps = { doc: doc, path: path.slice(), rich: b.rich, text: b.text, lead: bullet ? lead : null };
+        out.push(ps); last = ps;
+        if (!bullet) lead = /:\s*$/.test(b.text) ? b.text : null;
+      }
+      return { passages: out, groups: groups };
+    }
+
+    function ruleStatus(p) {
+      var h = (p.path[0] || '').toLowerCase();
+      if (/not settled|open question/.test(h)) return 'open';
+      if (/superseded/.test(h)) return 'superseded';
+      return 'settled';
+    }
+
+    /* Build the index. */
+    function ruleIndex(docs) {
+      var passages = [], groupsRaw = [];
+      docs.forEach(function (d) { passages = passages.concat(d.passages); groupsRaw = groupsRaw.concat(d.groups || []); });
+      /* word groups: single words -> group ids; several-word entries -> phrase keys */
+      var gOf = {}, phrases = {}, groups = [];
+      groupsRaw.forEach(function (words) {
+        var gi = groups.length, mem = {};
+        words.forEach(function (w) {
+          var ts = ruleToks(w).map(function (t) { return t.n; }).filter(function (n) { return n.length > 1 || /[א-ת]/.test(n); });
+          if (!ts.length) return;
+          var key = ts.join('_');
+          if (ts.length > 1) (phrases[ts[0]] = phrases[ts[0]] || []).push(ts);
+          mem[key] = 1;
+        });
+        var keys = Object.keys(mem);
+        if (keys.length < 2) return;
+        groups.push(keys);
+        keys.forEach(function (k) { (gOf[k] = gOf[k] || []).push(gi); });
+      });
+      var df = {}, total = 0, lzMap = {}, byFirst = {}, surf = {};
+      passages.forEach(function (p, i) {
+        p.i = i; p.status = ruleStatus(p);
+        var all = (p.lead ? p.lead + ' ' : '') + p.text + (p.ex ? ' ' + p.ex.map(richText).join(' ') : '');
+        p.all = all;
+        var toks = ruleToks(all), seq = toks.map(function (t) { return t.n; });
+        toks.forEach(function (t) { var c = surf[t.n] || (surf[t.n] = {}); c[t.w] = (c[t.w] || 0) + 1; });
+        /* add phrase keys where a several-word entry occurs */
+        var extra = [];
+        for (var k = 0; k < seq.length; k++) {
+          var cand = phrases[seq[k]]; if (!cand) continue;
+          cand.forEach(function (ph) {
+            for (var j = 0; j < ph.length; j++) if (seq[k + j] !== ph[j]) return;
+            extra.push(ph.join('_'));
+          });
+        }
+        p.seq = seq;
+        p.tf = {};
+        seq.concat(extra).forEach(function (n) { p.tf[n] = (p.tf[n] || 0) + 1; });
+        p.len = seq.length || 1; total += p.len;
+        p.head = {};
+        ruleToks(p.path.join(' ')).forEach(function (t) { p.head[t.n] = 1; });
+        var bold = (p.rich || []).filter(function (s) { return s[2]; }).map(function (s) { return s[0]; }).join(' ');
+        ruleToks(bold).forEach(function (t) { p.head[t.n] = 1; });
+        Object.keys(p.tf).forEach(function (n) { df[n] = (df[n] || 0) + 1; });
+        Object.keys(p.head).forEach(function (n) { if (!p.tf[n]) df[n] = (df[n] || 0) + 1; });
+      });
+      Object.keys(df).forEach(function (n) {
+        if (/[א-ת]/.test(n)) { var lk = loose(n); (lzMap[lk] = lzMap[lk] || []).push(n); }
+        else (byFirst[n[0]] = byFirst[n[0]] || []).push(n);
+      });
+      return { passages: passages, df: df, N: passages.length || 1, avg: total / (passages.length || 1),
+        groups: groups, gOf: gOf, phrases: phrases, lz: lzMap, byFirst: byFirst,
+        surf: function (n) { return n.split('_').map(function (x) { var c = surf[x]; if (!c) return x; return Object.keys(c).sort(function (a, b) { return c[b] - c[a]; })[0]; }).join(' '); } };
+    }
+
+    function osa(a, b, max) {
+      if (Math.abs(a.length - b.length) > max) return max + 1;
+      var d = [], i, j;
+      for (i = 0; i <= a.length; i++) { d[i] = [i]; }
+      for (j = 0; j <= b.length; j++) d[0][j] = j;
+      for (i = 1; i <= a.length; i++) {
+        var rowMin = max + 1;
+        for (j = 1; j <= b.length; j++) {
+          var c = a[i - 1] === b[j - 1] ? 0 : 1;
+          d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + c);
+          if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);
+          if (d[i][j] < rowMin) rowMin = d[i][j];
+        }
+        if (rowMin > max) return max + 1;
+      }
+      return d[a.length][b.length];
+    }
+
+    var PREFIX_HEB = /^[ובדהכלמש]/;
+    /* Each query word -> {variant: weight}. */
+    function ruleVariants(ix, n, raw, isLast) {
+      var v = {}, heb = /[א-ת]/.test(n);
+      function add(k, w, why) { if (!v[k] || v[k].w < w) v[k] = { w: w, why: why }; }
+      if (ix.df[n]) add(n, 1, '');
+      if (heb) {
+        var s = n, cut = 0;
+        while (PREFIX_HEB.test(s) && s.length > 2 && cut < 3) { s = s.slice(1); cut++; if (ix.df[s]) add(s, 0.85, ''); }
+        (ix.lz[loose(n)] || []).forEach(function (k) { add(k, 0.85, ''); });
+      } else if (!ix.df[n] && n.length >= 4) {
+        var max = n.length >= 8 ? 2 : 1;
+        (ix.byFirst[n[0]] || []).forEach(function (k) {
+          var dd = osa(n, k, max);
+          if (dd <= max) add(k, dd === 1 ? 0.7 : 0.55, 'spelling');
+          else if (k.length >= 7 && n.indexOf(k) === 0 && n.length - k.length <= 5) add(k, 0.6, 'spelling');
+        });
+      }
+      if (isLast && n.length >= 3 && !heb) {
+        var pre = (ix.byFirst[n[0]] || []).filter(function (k) { return k.length > n.length && k.indexOf(n) === 0; });
+        pre.sort(function (a, b) { return ix.df[b] - ix.df[a]; });
+        pre.slice(0, 25).forEach(function (k) { add(k, 0.6, ''); });
+      }
+      /* word groups, from the word itself and from the raw form */
+      var seeds = Object.keys(v).concat([n, ruleStem(engNorm(raw).replace(/[’'\-]/g, ''))]);
+      seeds.forEach(function (k) {
+        (ix.gOf[k] || []).forEach(function (gi) {
+          ix.groups[gi].forEach(function (m) { if (m !== k && ix.df[m]) add(m, 0.8 * (v[k] ? v[k].w : 1), 'group'); });
+        });
+      });
+      return v;
+    }
+
+    function ruleQuery(ix, q) {
+      var quoted = [], m, re = /["“”]([^"“”]+)["“”]/g;
+      while ((m = re.exec(q))) quoted.push(m[1]);
+      var toks = ruleToks(q), endsInWord = /[A-Za-zא-ת]$/.test(q);
+      var terms = [];
+      /* several-word group entries typed in the query ("em dash", "Beis Hamikdash") */
+      var seq = toks.map(function (t) { return t.n; }), used = {};
+      for (var k = 0; k < seq.length; k++) {
+        (ix.phrases[seq[k]] || []).forEach(function (ph) {
+          for (var j = 0; j < ph.length; j++) if (seq[k + j] !== ph[j]) return;
+          var key = ph.join('_');
+          if (ix.gOf[key]) { terms.push({ n: key, raw: ph.join(' '), phrase: true }); for (j = 0; j < ph.length; j++) used[k + j] = 1; }
+        });
+      }
+      var isQ = quoted.length > 0;
+      toks.forEach(function (t, i) {
+        if (used[i]) return;
+        var inQuote = quoted.some(function (qq) { return qq.toLowerCase().indexOf(t.w) >= 0; });
+        if (!inQuote && RULE_STOP[t.w.replace(/[’'\-]/g, '')] && !(RULE_FRAME[t.w] && toks.length === 1)) return;
+        if (!inQuote && t.w.length < 2 && !/[א-ת]/.test(t.w)) return;
+        terms.push({ n: t.n, raw: t.w, must: inQuote, last: i === toks.length - 1 && endsInWord && !isQ });
+      });
+      var seen = {};
+      terms = terms.filter(function (t) { if (seen[t.n]) return false; seen[t.n] = 1; return true; });
+      terms.forEach(function (t) {
+        t.v = ruleVariants(ix, t.n, t.raw, t.last);
+        if (t.must) { var keep = {}; if (t.v[t.n]) keep[t.n] = t.v[t.n]; t.v = keep; }
+      });
+      return terms;
+    }
+
+    function searchRules(ix, q, limit) {
+      var terms = ruleQuery(ix, q);
+      if (!terms.length) return { hits: [], terms: terms };
+      var k1 = 1.2, b = 0.6, N = ix.N;
+      function idf(n) { var d = ix.df[n] || 0; return Math.log(1 + (N - d + 0.5) / (d + 0.5)); }
+      var STATUS = { settled: 1, open: 0.8, superseded: 0.5 };
+      var own = {}; terms.forEach(function (t) { own[t.n] = 1; });
+      var hits = [];
+      ix.passages.forEach(function (p) {
+        var sc = 0, matched = 0, marks = {}, mustFail = false, best = [];
+        terms.forEach(function (t, ti) {
+          var top = 0, topK = null;
+          Object.keys(t.v).forEach(function (k) {
+            if (k !== t.n && own[k]) return;          /* another word of the question is this word itself */
+            var tf = p.tf[k] || 0, h = p.head[k] ? 1 : 0;
+            if (!tf && !h) return;
+            var w = (k !== t.n && ix.df[t.n]) ? Math.min(idf(k), idf(t.n)) : idf(k);   /* a synonym counts no more than the word typed */
+            var s = (tf ? w * tf * (k1 + 1) / (tf + k1 * (1 - b + b * p.len / ix.avg)) : 0) + h * 0.45 * w;
+            s *= t.v[k].w;
+            if (s > top) { top = s; topK = k; }
+            marks[k] = 1;
+          });
+          if (top > 0) { matched++; sc += top; best[ti] = topK; }
+          else if (t.must) mustFail = true;
+        });
+        if (!matched || mustFail) return;
+        /* adjacent query words side by side in the passage */
+        for (var i = 0; i + 1 < terms.length; i++) {
+          var a = best[i], c = best[i + 1];
+          if (!a || !c || a.indexOf('_') >= 0 || c.indexOf('_') >= 0) continue;
+          for (var j = 0; j + 1 < p.seq.length; j++) if (p.seq[j] === a && p.seq[j + 1] === c) { sc += 0.5 * (idf(a) + idf(c)) / 2; break; }
+        }
+        var cover = matched / terms.length;
+        sc *= Math.pow(cover, terms.length > 1 ? 2 : 1) * (p.doc.weight || 1) * (STATUS[p.status] || 1);
+        hits.push({ p: p, score: sc, marks: marks, cover: cover });
+      });
+      hits.sort(function (x, y) { return y.score - x.score; });
+      /* when some passages match every word, drop the ones that match only part of the question */
+      if (terms.length > 1 && hits.length && hits[0].cover === 1) {
+        var full = hits.filter(function (h) { return h.cover === 1; }).length;
+        if (full >= 3) hits = hits.filter(function (h) { return h.cover === 1 || h.score > hits[0].score * 0.5; });
+      }
+      var also = {};
+      terms.forEach(function (t) { Object.keys(t.v).forEach(function (k) { if (own[k]) return; if (t.v[k].why === 'group' || t.v[k].why === 'spelling') also[ix.surf(k)] = t.v[k].why; }); });
+      return { hits: hits.slice(0, limit || hits.length), total: hits.length, terms: terms, also: also };
+    }
+    return { passages: rulePassages, index: ruleIndex, search: searchRules, richText: richText };
+  })();
+
+  /* ---------- Ask Claude ----------
+     The same assistant as the site's Ask Claude page. Claude runs behind the team's relay (C.askRelay), which
+     holds the API key and Claude's instructions, and lets in only people signed in with an Aleh Zayis account.
+     The app runs the four searches Claude asks for, over what the Guide already reads: the rulebooks, the
+     delivered corpus and its headers, and the transliteration and definitions lists. Nothing about people,
+     contacts, the tracker or deadlines is ever sent. */
+  var ASK_MAX_ROUNDS = 8;
+  var ASK_LABEL = { search_rules: 'Searching the rulebooks', search_corpus: 'Searching the delivered volumes',
+    search_headers: 'Searching the headers', lookup_terms: 'Checking the transliteration and definitions lists' };
+  var ASK_TRIES = ['When do we write “may” and when “can”?', 'How was תא שמע rendered in each masechta?',
+    'Which lead-ins do we use for a challenge, and how often?', 'Check this sentence against house style: …'];
+  var RULE_SOURCES = [
+    { key: 'rulings', label: 'House Rulings', res: /^house\s*rulings/i, weight: 1.15 },
+    { key: 'style', label: 'Style Guide', res: /style\s*guide/i, weight: 1.1 },
+    { key: 'proof', label: 'Proofreading Guidelines', path: 'Claude/Proofreading/Guidelines.docx', weight: 1.0 },
+    { key: 'gfx', label: 'Graphics Guidelines', path: 'Claude/Graphics/Guidelines.docx', weight: 0.95 }
+  ];
+
+  /* the sign-in's ID token proves to the relay who is asking; it carries no access to anything */
+  async function idToken(force) {
+    if (TEST) return TEST.idToken ? TEST.idToken(force) : 'test-token';
+    var r;
+    try { r = await msalApp.acquireTokenSilent({ scopes: SCOPES, account: msalApp.getActiveAccount(), forceRefresh: !!force }); }
+    catch (e) { await getToken(); throw e; }   // getToken sends the person back to sign in when that is what's needed
+    var exp = (r.idTokenClaims && r.idTokenClaims.exp) || 0;
+    if (!force && exp * 1000 < Date.now() + 5 * 60000) return idToken(true);
+    return r.idToken;
+  }
+  async function askRelay(messages, retried) {
+    var tok = await idToken(!!retried);
+    var res = TEST && TEST.relay ? await TEST.relay(messages, tok)
+      : await fetch(C.askRelay, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + tok }, body: JSON.stringify({ messages: messages }) });
+    var j = await res.json().catch(function () { return {}; });
+    if (res.status === 401 && !retried) return askRelay(messages, true);
+    if (!res.ok) throw new Error(j.error || ('Claude is not available right now (' + res.status + ').'));
+    return j;
+  }
+
+  async function wordXml(item) {
+    if (TEST) return TEST.docXml(item);
+    var full = item['@microsoft.graph.downloadUrl'] ? item : await g('/drives/' + (await driveId()) + '/items/' + item.id);
+    var zip = await JSZip.loadAsync(await (await fetch(full['@microsoft.graph.downloadUrl'])).arrayBuffer());
+    return zip.file('word/document.xml').async('string');
+  }
+  async function rulesIndex() {
+    if (S.rulesIx) return S.rulesIx;
+    var res = await resourceFiles(), d0 = await driveId();
+    var parts = await Promise.all(RULE_SOURCES.map(async function (d) {
+      try {
+        var item;
+        if (d.res) {
+          var hits = res.filter(function (f) { return d.res.test(f.name) && !/^~/.test(f.name); });
+          hits.sort(function (a, b) { return String(b.lastModifiedDateTime || '').localeCompare(String(a.lastModifiedDateTime || '')); });
+          item = hits[0];
+          if (!item) return null;
+        } else item = await g('/drives/' + d0 + '/root:/' + d.path.split('/').map(encodeURIComponent).join('/'));
+        return RULES.passages(await wordXml(item), { key: d.key, label: d.label, weight: d.weight });
+      } catch (e) { return null; }
+    }));
+    var docs = parts.filter(Boolean);
+    if (!docs.length) throw new Error('The rulebooks could not be opened.');
+    S.rulesIx = RULES.index(docs);
+    return S.rulesIx;
+  }
+
+  /* [[text, italic, bold?]] -> text with _italics_, so Claude sees what is italic */
+  function askPlain(r) {
+    return (r || []).map(function (s) {
+      var t = s[0] || '';
+      if (!s[1] || !t.trim()) return t;
+      var m = t.match(/^(\s*)([\s\S]*?)(\s*)$/);
+      return m[1] + '_' + m[2] + '_' + m[3];
+    }).join('');
+  }
+  function askCut(s, n) { s = String(s || ''); return s.length > n ? s.slice(0, n) + '…' : s; }
+  function askNum(v, lo, hi, dflt) { v = parseInt(v, 10); return isNaN(v) ? dflt : Math.max(lo, Math.min(hi, v)); }
+  function askPlaces(hits, n) {
+    var out = [];
+    hits.forEach(function (h) { var k = h.m + ' ' + h.daf + (h.part > 1 ? ' (' + h.part + ')' : ''); if (out.indexOf(k) < 0 && out.length < n) out.push(k); });
+    return out;
+  }
+  /* after an answer, earlier search results are dropped from the history (Claude keeps its answer), so follow-ups stay cheap */
+  function askSlim(turn) {
+    return turn.map(function (m) {
+      if (typeof m.content === 'string') return m;
+      if (m.role === 'assistant') return { role: 'assistant', content: m.content.filter(function (b) { return b.type !== 'thinking' && b.type !== 'redacted_thinking'; }) };
+      return { role: 'user', content: m.content.map(function (b) {
+        return b.type === 'tool_result' ? { type: 'tool_result', tool_use_id: b.tool_use_id, content: '(earlier search results omitted)' } : b;
+      }) };
+    });
+  }
+
+  async function askTool(name, input, onStatus) {
+    input = input || {};
+    var q = String(input.query || '').trim();
+    if (!q) return { error: 'empty query' };
+    if (name === 'search_rules') {
+      var r = RULES.search(await rulesIndex(), q, askNum(input.limit, 1, 15, 8));
+      return {
+        total: r.total,
+        passages: r.hits.map(function (h) {
+          var p = h.p;
+          return {
+            source: [p.doc.label].concat(p.path.filter(Boolean)).join(' › '),
+            status: p.status || 'settled',
+            lead: p.lead || undefined,
+            text: askCut(askPlain(p.rich), 1500),
+            examples: (p.ex || []).slice(0, 3).map(function (e) { return askCut(askPlain(e), 400); })
+          };
+        })
+      };
+    }
+    if (name === 'search_corpus' || name === 'search_headers') {
+      var idx = await corpusIndex();
+      var names = idx.masechtos.map(function (x) { return x.name; }), want = names;
+      if (input.masechta) {
+        var w = String(input.masechta).toLowerCase();
+        want = names.filter(function (m) { var l = m.toLowerCase(); return l.indexOf(w) === 0 || w.indexOf(l) === 0; });
+        if (!want.length) return { error: 'No masechta called ' + input.masechta + ' in the corpus.', masechtos: names };
+      }
+      if (name === 'search_corpus') {
+        for (var i = 0; i < want.length; i++) await loadCorpus(want[i], onStatus);
+        var res = phraseSearch(want.map(function (m) { return S.corp[m] || []; }), q, true);
+        if (!res) return { error: 'The search needs at least two letters.' };
+        var per = {}, exact = 0;
+        res.groups.forEach(function (gr) { gr.hits.forEach(function (h) { per[h.m] = (per[h.m] || 0) + 1; if (gr.exact) exact++; }); });
+        return {
+          corpus_covers: names, searched: want, occurrences_per_masechta: per,
+          total_occurrences: res.total, capped: res.capped || undefined, exact_phrase_chunks: exact, renderings_found: res.groups.length,
+          renderings: res.groups.slice(0, askNum(input.limit, 1, 40, 15)).map(function (gr) {
+            var pm = {};
+            gr.hits.forEach(function (h) { pm[h.m] = (pm[h.m] || 0) + 1; });
+            return { english: askCut(gr.rich ? askPlain(gr.rich) : gr.eng, 700), hebrew: askCut(gr.heb, 400), uses: gr.hits.length,
+              per_masechta: pm, whole_chunk_is_the_phrase: gr.exact || undefined, places: askPlaces(gr.hits, 6) };
+          })
+        };
+      }
+      if (hasHe(q)) return { error: 'Headers are in English; search with English words.' };
+      for (var k = 0; k < want.length; k++) await loadHeaders(want[k]);
+      var groups = headerSearch(want.map(function (m) { return S.hdr[m] || []; }), q);
+      var hper = {}, htotal = 0;
+      groups.forEach(function (gr) { gr.items.forEach(function (h) { hper[h.m] = (hper[h.m] || 0) + 1; htotal++; }); });
+      if (!htotal && !Object.keys(S.hdr).some(function (m) { return S.hdr[m].length; })) return { error: 'Headers have not been read into the corpus yet.' };
+      return {
+        corpus_covers: names, searched: want, total_headers_matched: htotal, per_masechta: hper, wordings_found: groups.length,
+        wordings: groups.slice(0, askNum(input.limit, 1, 30, 12)).map(function (gr) {
+          var pm = {};
+          gr.items.forEach(function (h) { pm[h.m] = (pm[h.m] || 0) + 1; });
+          return { wording: gr.rich ? askPlain(gr.rich) : gr.text, uses: gr.items.length, per_masechta: pm,
+            kinds: { opens_a_paragraph: gr.kinds.o, mid_paragraph: gr.kinds.m, own_line: gr.kinds.s }, examples: askPlaces(gr.items, 4) };
+        })
+      };
+    }
+    if (name === 'lookup_terms') {
+      var out = {};
+      var lists = [['transliterations', 'Spelling', 10], ['definitions', 'Definitions', 6]];
+      for (var j = 0; j < lists.length; j++) {
+        var mode = GUIDE.filter(function (x) { return x.key === lists[j][1]; })[0];
+        try {
+          var doc = await loadDoc(mode);
+          out[lists[j][0]] = searchDoc(doc, q, mode).slice(0, lists[j][2]).map(function (h) {
+            return h.e.cells ? h.e.cells.map(function (c) { return askCut(c, 600); }).join(' | ') : askCut(h.e.text, 900);
+          });
+        } catch (e) { out[lists[j][0]] = { error: e.message }; }
+      }
+      return out;
+    }
+    return { error: 'unknown tool' };
+  }
+
+  /* Claude's answer: a small, safe subset of Markdown (paragraphs, lists, tables, bold, italics, code) */
+  function askMd(s) {
+    var out = [], list = null, table = null;
+    function inline(t) {
+      return esc(t)
+        .replace(/`([^`]+)`/g, '<code>$1</code>')
+        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+        .replace(/(^|[\s(\[“‘"';>])\*([^*\s][^*]*)\*(?=[\s)\].,;:!?”’"'s&<]|$)/g, '$1<em>$2</em>')
+        .replace(/(^|[\s(\[“‘"';>])_([^_\s][^_]*)_(?=[\s)\].,;:!?”’"'s&<]|$)/g, '$1<em>$2</em>');
+    }
+    function endList() { if (list) { out.push('<ul>' + list.join('') + '</ul>'); list = null; } }
+    function endTable() {
+      if (!table) return;
+      out.push('<div class="ask-tbl"><table>' + table.map(function (r, i) {
+        var tag = i === 0 ? 'th' : 'td';
+        return '<tr>' + r.map(function (c) { return '<' + tag + ' dir="auto">' + inline(c) + '</' + tag + '>'; }).join('') + '</tr>';
+      }).join('') + '</table></div>');
+      table = null;
+    }
+    String(s || '').split(/\n/).forEach(function (line) {
+      if (/^\s*\|.*\|\s*$/.test(line)) {
+        endList();
+        if (/^\s*\|[\s:|-]+\|\s*$/.test(line)) return;
+        (table = table || []).push(line.trim().slice(1, -1).split('|').map(function (c) { return c.trim(); }));
+        return;
+      }
+      endTable();
+      var m = line.match(/^\s*(?:[-*•]|\d+[.)])\s+(.*)$/);
+      if (m) { (list = list || []).push('<li dir="auto">' + inline(m[1]) + '</li>'); return; }
+      endList();
+      var h = line.match(/^#{1,4}\s+(.*)$/);
+      if (h) { out.push('<p><strong>' + inline(h[1]) + '</strong></p>'); return; }
+      if (line.trim()) out.push('<p dir="auto">' + inline(line) + '</p>');
+    });
+    endTable(); endList();
+    return out.join('');
+  }
+
+  function askLogHtml(A) {
+    var h = A.items.map(function (it) {
+      if (it.k === 'u') return '<div class="ask-m u" dir="auto">' + esc(it.t) + '</div>';
+      if (it.k === 'e') return '<div class="ask-m e">' + esc(it.t) + '</div>';
+      return '<div class="ask-m a">' + it.h + '</div>';
+    }).join('');
+    if (!A.items.length) h = '<div class="ask-m a"><p>What would you like to know? A few things to try:</p><div class="ask-tries">' +
+      ASK_TRIES.map(function (t) { return '<button type="button" class="chipbtn" data-act="asktry">' + esc(t) + '</button>'; }).join('') + '</div></div>';
+    if (A.busy) h += '<div class="ask-m s" id="askStatus">' + esc(A.status || 'Thinking…') + '</div>';
+    return h;
+  }
+  function renderAsk(scroll) {
+    var log = $('#askLog'), A = S.ask;
+    if (!log || !A) return;
+    log.innerHTML = askLogHtml(A);
+    var go = $('#askGo'); if (go) go.disabled = A.busy;
+    if (scroll) { var last = log.lastElementChild; if (last) last.scrollIntoView({ block: 'nearest' }); }
+  }
+  function askStatus(t) { S.ask.status = t; var el = $('#askStatus'); if (el) el.textContent = t; }
+  function screenAsk() {
+    frame({ title: 'Ask Claude', tab: 'more', kicker: 'Style, process and the corpus' });
+    var A = S.ask || (S.ask = { convo: [], items: [], busy: false });
+    setView('<p class="note">Ask about house style, the editing process, a passage you are editing, or patterns across the delivered volumes. ' +
+      'Claude searches House Rulings, the Style Guide, the Guidelines and the corpus before it answers, and says where each answer comes from.</p>' +
+      '<div class="ask-log" id="askLog" aria-live="polite"></div>' +
+      '<form class="ask-form" id="askForm"><label class="sr" for="askQ">Your question</label>' +
+      '<textarea id="askQ" rows="2" dir="auto" placeholder="Ask a question, or paste a passage to check…">' + esc(A.draft || '') + '</textarea>' +
+      '<button class="btn" type="submit" id="askGo">Ask</button></form>' +
+      '<div class="ask-foot"><p class="note">For style, process, edits and corpus reports only. Answers can be wrong; the rulebooks and the overseeing editor have the final word.</p>' +
+      '<button type="button" class="btn ghost" data-act="asknew">New conversation</button></div>');
+    renderAsk(false);
+    var ta = $('#askQ');
+    ta.addEventListener('input', function () { A.draft = ta.value; });
+    ta.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && window.matchMedia('(min-width: 900px)').matches) { e.preventDefault(); askSubmit(); }
+    });
+    $('#askForm').addEventListener('submit', function (e) { e.preventDefault(); askSubmit(); });
+  }
+  async function askSubmit(text) {
+    var A = S.ask, ta = $('#askQ');
+    var q = String(text != null ? text : (ta ? ta.value : '')).trim();
+    if (!q || !A || A.busy) return;
+    A.busy = true; A.status = 'Thinking…'; A.draft = '';
+    if (ta) ta.value = '';
+    A.items.push({ k: 'u', t: q });
+    renderAsk(true);
+    var turn = A.convo.concat([{ role: 'user', content: q }]);
+    try {
+      for (var round = 0; round < ASK_MAX_ROUNDS; round++) {
+        var j = await askRelay(turn);
+        var content = j.content || [];
+        turn.push({ role: 'assistant', content: content });
+        var uses = content.filter(function (b) { return b.type === 'tool_use'; });
+        if (j.stop_reason !== 'tool_use' || !uses.length) {
+          var answer = content.filter(function (b) { return b.type === 'text'; }).map(function (b) { return b.text; }).join('\n\n').trim();
+          A.items.push({ k: 'a', h: askMd(answer || 'I could not find an answer to that.') });
+          A.convo = askSlim(turn);
+          return;
+        }
+        var results = [];
+        for (var k = 0; k < uses.length; k++) {
+          var u = uses[k], out;
+          askStatus((ASK_LABEL[u.name] || 'Searching') + (u.input && u.input.query ? ' for “' + askCut(u.input.query, 60) + '”' : '') + '…');
+          try { out = await askTool(u.name, u.input, askStatus); } catch (e) { out = { error: String(e && e.message || e) }; }
+          var s = JSON.stringify(out);
+          results.push({ type: 'tool_result', tool_use_id: u.id, content: s.length > 14000 ? s.slice(0, 14000) + '…(cut)' : s });
+        }
+        turn.push({ role: 'user', content: results });
+        askStatus('Reading what it found…');
+      }
+      A.items.push({ k: 'e', t: 'That took too many searches. Try a narrower question.' });
+    } catch (e) {
+      A.items.push({ k: 'e', t: (e && e.message) || 'Something went wrong.' });
+    } finally {
+      A.busy = false;
+      renderAsk(true);
+      var t2 = $('#askQ'); if (t2 && window.matchMedia('(min-width: 900px)').matches) t2.focus();
+    }
+  }
+
   /* ---------- feedback ---------- */
   async function feedbackList() {
     if (S.feedback) return S.feedback;
@@ -787,6 +1438,7 @@
     if (mine.length) h += '<p class="note">Amudim from your deadlines that haven’t reached the deadline’s stage, plus any you’ve starred.</p>';
     h += '</div><div class="hg-links"><h2 class="sec">Quick links</h2><div class="card pad0 navlist">' +
       '<a href="#/guide">' + ICON.pen.replace('M4 20l1-4L16 5a2.1 2.1 0 0 1 3 3L8 19z', 'M11 4.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zM16 16l4.5 4.5') + '<span class="grow">Look-ups, phrases and headers</span>' + ICON.chev + '</a>' +
+      '<a href="#/ask">' + ICON.ask + '<span class="grow">Ask Claude</span><span class="aside">style, process, corpus</span>' + ICON.chev + '</a>' +
       '<a href="#/deadlines">' + ICON.cal + '<span class="grow">All deadlines</span>' + ICON.chev + '</a>' +
       '<a href="#/files">' + ICON.folder + '<span class="grow">Files</span>' + ICON.chev + '</a>' +
       '<a href="' + esc(C.chatUrl) + '" target="_blank" rel="noopener">' + ICON.chat + '<span class="grow">Team chat</span>' + ICON.ext + '</a></div></div></div>';
@@ -980,7 +1632,7 @@
     S.cFilter = S.cFilter || 'All';
     var sub = '<div class="chips scroll" role="group" aria-label="Look-up">' + GUIDE.map(function (x) {
       return '<button class="chipbtn" data-act="gmode" data-k="' + x.key + '" aria-pressed="' + (x.key === mode.key) + '">' + x.key + '</button>';
-    }).join('') + '</div><label class="sr" for="gq">' + esc(mode.ph) + '</label>' +
+    }).join('') + '<a class="chipbtn chip-ask" href="#/ask">' + ICON.ask + 'Ask Claude</a></div><label class="sr" for="gq">' + esc(mode.ph) + '</label>' +
       '<input id="gq" type="search" dir="auto" placeholder="' + esc(mode.ph) + '" value="' + esc(S.guideQ) + '" autocomplete="off" style="margin-top:10px">' +
       '<div id="gfilter"></div>';
     frame({ title: 'Guide', tab: 'guide', kicker: 'Style and look-ups', sub: sub });
@@ -1128,6 +1780,7 @@
     frame({ title: 'More', tab: 'more', kicker: 'MDY Aleh Zayis Team' });
     setView('<div class="card" style="display:flex;align-items:center;gap:12px"><div style="width:46px;height:46px;border-radius:999px;background:var(--navy);color:var(--gold);display:flex;align-items:center;justify-content:center;font-weight:700">' + esc(initials()) + '</div><div><b>' + esc((S.me && S.me.displayName) || '') + '</b><div class="note">Signed in with your Aleh Zayis account</div></div></div>' +
       '<nav class="card pad0 navlist" aria-label="More pages">' +
+      '<a href="#/ask">' + ICON.ask + '<span class="grow">Ask Claude</span><span class="aside">style, process, corpus</span>' + ICON.chev + '</a>' +
       '<a href="#/deadlines">' + ICON.cal + '<span class="grow">Deadlines</span>' + ICON.chev + '</a>' +
       '<a href="#/graphics">' + ICON.pic + '<span class="grow">Graphics</span>' + ICON.chev + '</a>' +
       '<a href="#/files">' + ICON.folder + '<span class="grow">Files</span><span class="aside">the team library</span>' + ICON.chev + '</a>' +
@@ -1377,6 +2030,7 @@
       else if (name === 'feedback') await screenFeedback(arg);
       else if (name === 'files') { if (!arg) S.fileQ = ''; await screenFiles(r.slice(1).map(decodeURIComponent).join('/')); }
       else if (name === 'contacts') await screenContacts();
+      else if (name === 'ask') screenAsk();
       else { location.hash = '#/home'; return; }
     } catch (e) {
       if (id === routing) fail(e, route);
@@ -1384,7 +2038,7 @@
     }
   }
   async function refresh() {
-    S.tracker = null; S.deadlines = null; S.rootKids = null; S.folders = {}; S.cidx = null; S.corp = {}; S.hdr = {}; S.feedback = null;
+    S.tracker = null; S.deadlines = null; S.rootKids = null; S.folders = {}; S.cidx = null; S.corp = {}; S.hdr = {}; S.feedback = null; S.rulesIx = null;
     await route();
     toast('Up to date');
   }
@@ -1434,6 +2088,8 @@
     if (act === 'fbmore') { route(); return; }
     if (act === 'pickfile') { $('#sFile').click(); return; }
     if (act === 'send') { doSend(); return; }
+    if (act === 'asknew') { if (S.ask && !S.ask.busy) { S.ask.convo = []; S.ask.items = []; renderAsk(false); var aq = $('#askQ'); if (aq) aq.focus(); } return; }
+    if (act === 'asktry') { var tq = el.textContent; if (/…$/.test(tq)) { var at = $('#askQ'); if (at) { at.value = tq.replace(/\s*…$/, ' '); S.ask.draft = at.value; at.focus(); } } else askSubmit(tq); return; }
     if (act === 'again') { S.submit = null; location.hash = '#/submit'; route(); return; }
   });
   document.addEventListener('change', async function (ev) {
