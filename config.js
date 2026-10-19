@@ -11,8 +11,8 @@ window.MDY_CONFIG = {
     deadlines: '97d2c140-5a78-45d6-aa0f-12751b213469',
     feedbackTitle: 'Team Feedback'
   },
-  masechtos: ['Kerisos', 'Meilah', 'Tamid', 'Midos', 'Kinim', 'Temurah'],
-  prefixes: { Kerisos: 'KER', Meilah: 'MEI', Tamid: 'TAM', Midos: 'MID', Kinim: 'KIN', Temurah: 'TEM' },
+  masechtos: ['Kerisos', 'Meilah', 'Tamid', 'Middos', 'Kinnim', 'Temurah'],
+  prefixes: { Kerisos: 'KER', Meilah: 'MEI', Tamid: 'TAM', Middos: 'MID', Kinnim: 'KIN', Temurah: 'TEM' },
   resourcesFolder: 'Resources',
   siteAssetsDrive: 'b!-uVDfUf5LEeRULpN1gypU3ud3ezGcDxOi7ykzS1m9EU_rOsoceDARo88MgL_5cmC',
   contactsPage: 'Contacts.aspx',
@@ -20,7 +20,7 @@ window.MDY_CONFIG = {
      A volume shows from its 'from' date (Israel time) until every amud in it is Final. */
   volumes: [
     { name: 'Kerisos', masechtos: ['Kerisos'], from: '' },
-    { name: 'Meilah volume', sub: 'Meilah \u00b7 Kinim \u00b7 Tamid \u00b7 Midos', masechtos: ['Meilah', 'Kinim', 'Tamid', 'Midos'], from: '2026-10-25' }
+    { name: 'Meilah volume', sub: 'Meilah \u00b7 Kinnim \u00b7 Tamid \u00b7 Middos', masechtos: ['Meilah', 'Kinnim', 'Tamid', 'Middos'], from: '2026-10-25' }
   ],
   /* Ask Claude: the team's relay to the Claude API. It holds the key and checks the person's Aleh Zayis sign-in. */
   askRelay: 'https://mdy-claude.yaakovbressler1.workers.dev/',
