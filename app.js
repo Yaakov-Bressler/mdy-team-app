@@ -1264,14 +1264,25 @@
       m = a.match(/(\d+)/);
       return m ? m[1] + 'a' : '';
     }
-    var KIND = { gemara: 'gemara', text: 'gemara', gemoro: 'gemara', rashi: 'rashi', mesivta: 'mesivta', metivta: 'mesivta',
-      biur: 'mesivta', hearos: 'mesivta_hearos', mesivta_hearos: 'mesivta_hearos', notes: 'mesivta_hearos' };
+    var KIND = { gemara: 'gemara', text: 'gemara', gemoro: 'gemara', mishnah: 'mishnah', mishna: 'mishnah', mishnayos: 'mishnah',
+      rashi: 'rashi', mesivta: 'mesivta', metivta: 'mesivta', biur: 'mesivta', hearos: 'mesivta_hearos', mesivta_hearos: 'mesivta_hearos', notes: 'mesivta_hearos',
+      tosafos: 'tosafos', tosfos: 'tosafos', tosafot: 'tosafos', tosafes: 'tosafos', tos: 'tosafos',
+      rosh: 'rosh', harosh: 'rosh', peirush_harosh: 'rosh', rabbeinu_asher: 'rosh',
+      peirush: 'peirush', perush: 'peirush', pirush: 'peirush', vilna_peirush: 'peirush',
+      rambam: 'rambam', peirush_hamishnayos: 'rambam', maimonides: 'rambam',
+      bartenura: 'bartenura', bertinoro: 'bartenura', bartenuro: 'bartenura', rav: 'bartenura',
+      delivered: 'delivered', english: 'delivered', translation: 'delivered', elucidation: 'delivered', final: 'delivered', corpus: 'delivered', volume: 'delivered',
+      commentary: '@record', commentary_of_record: '@record', record: '@record', main_commentary: '@record' };
     var NOTE = {
       gemara: 'Menukad Gemara text of record (nikkud byte-for-byte from the source).',
+      mishnah: 'The pointed Mishnah, divided by Vilna amud: the text of record for this masechta.',
       rashi: 'Vilna Rashi, unpointed.',
       mesivta: 'Mesivta (Oz VeHadar) biur column, OCR of the scan: expect occasional letter confusions; never use it as evidence for nikkud.',
-      mesivta_hearos: "Mesivta he'aros (the numbered notes under the line), OCR. Reference only: never fold them into an elucidation."
+      mesivta_hearos: "Mesivta he'aros (the numbered notes under the line), OCR. Reference only: never fold them into an elucidation.",
+      delivered: 'The delivered English of this amud, chunk by chunk as "Hebrew ‖ English"; [line] marks an English line or header on its own line.'
     };
+    var NAME = { rashi: 'Rashi', tosafos: 'Tosafos', rosh: 'the Rosh', peirush: 'the Vilna Peirush', rambam: 'the Rambam', bartenura: 'Bartenura' };
+    function kindOf(v) { var k = String(v || 'gemara').toLowerCase().replace(/['’]/g, '').replace(/[^a-z_ ]/g, '').trim().replace(/\s+/g, '_'); return KIND[k] || k || 'gemara'; }
     /* where each instruction document sits in the authority order of rulings.md § Authority hierarchy */
     function standing(name) {
       var n = String(name).toLowerCase();
@@ -1296,17 +1307,36 @@
         return hit || null;
       }
       function file(m) { return FILES[m.file] || (FILES[m.file] = io.json(m.file)); }
-      function have(ix) { return ix.masechtos.map(function (m) { return m.masechta + ': ' + Object.keys(m.texts).map(function (k) { return k + ' ' + m.texts[k].first + '–' + m.texts[k].last; }).join(', '); }); }
-
-      async function readSource(input) {
-        var ix = await index(), m = await masechta(input.masechta);
-        if (!m) return { error: 'No source texts for "' + (input.masechta || '') + '".', available: have(ix) };
-        var kind = KIND[String(input.text || 'gemara').toLowerCase().replace(/[^a-z_]/g, '')] || 'gemara';
-        var d = await file(m), T = d.texts[kind];
-        if (!T) return { error: m.masechta + ' has no ' + kind + ' text in the library.', available: Object.keys(d.texts) };
-        var a = amudKey(input.amud), body = T.amudim[a];
-        if (body == null) return { error: m.masechta + ' ' + kind + ' has no amud ' + (input.amud || '') + '.', range: Object.keys(T.amudim)[0] + '–' + Object.keys(T.amudim).slice(-1)[0] };
-        var out = { masechta: m.masechta, amud: a, text: kind, about: NOTE[kind] + (m.text_kind === 'derived' && kind === 'gemara' ? ' For this masechta the text is derived from the delivered English master, so it follows the delivered edition, not the Vilna daf.' : '') };
+      function load(name) { return FILES[name] || (FILES[name] = io.json(name)); }
+      function have(ix) {
+        return ix.masechtos.map(function (m) {
+          return m.masechta + (m.producer ? ' (' + m.producer + ')' : '') + ': ' + Object.keys(m.texts).map(function (k) {
+            var t = m.texts[k]; return k + ' ' + t.first + '–' + t.last + (t.role ? ' [' + t.role + ']' : '');
+          }).join(', ');
+        });
+      }
+      /* the text of one kind for one masechta: { note, amudim, role } from the masechta's sources file or from the text's own file */
+      async function textOf(m, kind) {
+        var T = m.texts[kind];
+        if (!T) return null;
+        if (T.file) { var f = await load(T.file); return { note: T.note || f.source || NOTE[kind] || '', amudim: f.amudim, role: T.role }; }
+        if (!m.file) return null;
+        var d = await file(m), X = d.texts[kind];
+        return X ? { note: X.note || T.note || NOTE[kind] || '', amudim: X.amudim, role: T.role } : null;
+      }
+      /* which text answers a request: the commentary of record stands in the rashi slot where it is not Rashi */
+      function pick(m, kind) {
+        var rec = m.commentary_of_record || 'rashi';
+        if (kind === '@record') kind = rec;
+        if (!m.texts[kind]) {
+          if (kind === 'gemara' && m.texts.mishnah) kind = 'mishnah';
+          else if (kind === 'mishnah' && m.texts.gemara) kind = 'gemara';
+          else if (kind === 'rashi' && m.texts[rec]) kind = rec;
+          else if ((kind === 'gemara' || kind === 'mishnah') && m.texts.delivered && Object.keys(m.texts).length === 1) kind = 'delivered';
+        }
+        return kind;
+      }
+      function slice(body, input, out) {
         if (input.query) {
           var q = hnorm(input.query), paras = body.split(/\n+/).filter(function (p) { return hnorm(p).indexOf(q) >= 0; });
           out.query = input.query;
@@ -1322,31 +1352,83 @@
         return out;
       }
 
+      async function readSource(input) {
+        var ix = await index(), m = await masechta(input.masechta);
+        if (!m) return { error: 'No source texts for "' + (input.masechta || '') + '".', available: have(ix) };
+        var asked = kindOf(input.text), kind = pick(m, asked), rec = m.commentary_of_record || null;
+        var T = await textOf(m, kind);
+        if (!T) return { error: m.masechta + ' has no ' + kind + ' text in the library.', available: have({ masechtos: [m] })[0] };
+        var a = amudKey(input.amud), body = T.amudim[a], keys = Object.keys(T.amudim);
+        if (body == null) return { error: m.masechta + ' ' + kind + ' has no amud ' + (input.amud || '') + '.', range: keys[0] + '–' + keys[keys.length - 1] };
+        var out = { masechta: m.masechta, amud: a, text: kind, about: T.note + (m.text_kind === 'derived' && kind === 'gemara' ? ' For this masechta the text is derived from the delivered English master, so it follows the delivered edition, not the Vilna daf.' : '') };
+        if (T.role) out.role = T.role;
+        if (rec && rec !== 'rashi') out.commentary_of_record = NAME[rec] + ' (text "' + rec + '")';
+        if (kind !== asked && asked !== '@record') out.note_on_text = 'You asked for ' + asked + '; on ' + m.masechta + ' that place is held by ' + (NAME[kind] || kind) + '.';
+        if (m.status) out.status = m.status;
+        slice(body, input, out);
+        /* a secondary commentary always comes with the commentary of record on the same amud, so the hierarchy is never lost */
+        if (rec && kind !== rec && m.texts[rec] && T.role === 'secondary commentary') {
+          var R = await textOf(m, rec), rb = R && R.amudim[a];
+          if (rb != null) {
+            var r2 = slice(rb, input, {});
+            out.commentary_of_record_on_this_amud = { text: rec, about: R.note, content: cut(r2.content || '', 6000), note: r2.note };
+          }
+        }
+        if (m.producer) out.warning = m.producer + '. Not our house style: never cite it as precedent for how we write.';
+        return out;
+      }
+
       async function searchSources(input) {
         var ix = await index(), q = hnorm(input.query);
         if (!q) return { error: 'empty query' };
         var ms = ix.masechtos;
         if (input.masechta) { var one = await masechta(input.masechta); if (!one) return { error: 'No source texts for "' + input.masechta + '".', available: have(ix) }; ms = [one]; }
-        var want = input.text ? (KIND[String(input.text).toLowerCase().replace(/[^a-z_]/g, '')] || null) : null;
+        var want = input.text ? kindOf(input.text) : null;
         var lim = num(input.limit, 1, 40, 15), hits = [], counts = {}, total = 0;
         for (var i = 0; i < ms.length; i++) {
-          var d = await file(ms[i]);
-          Object.keys(d.texts).forEach(function (k) {
-            if (want && k !== want) return;
-            var am = d.texts[k].amudim;
+          var m = ms[i], w = want === '@record' ? (m.commentary_of_record || 'rashi') : want;
+          var kinds = Object.keys(m.texts).filter(function (k) {
+            if (w) return k === w || (w === 'gemara' && k === 'mishnah');
+            return k !== 'delivered';      /* the delivered English is searched by search_corpus, or here with text "delivered" */
+          });
+          for (var j = 0; j < kinds.length; j++) {
+            var k = kinds[j], T = await textOf(m, k);
+            if (!T) continue;
+            var am = T.amudim;
             Object.keys(am).forEach(function (a) {
               am[a].split(/\n+/).forEach(function (para) {
                 var n = hnorm(para), at = n.indexOf(q);
                 if (at < 0) return;
                 total++;
-                var c = d.masechta + ' ' + k; counts[c] = (counts[c] || 0) + 1;
-                if (hits.length < lim) hits.push({ masechta: d.masechta, amud: a, text: k, snippet: '…' + n.slice(Math.max(0, at - 160), at + q.length + 160) + '…' });
+                var c = m.masechta + ' ' + k; counts[c] = (counts[c] || 0) + 1;
+                if (hits.length < lim) hits.push({ masechta: m.masechta, amud: a, text: k, role: T.role || undefined, snippet: '…' + n.slice(Math.max(0, at - 160), at + q.length + 160) + '…' });
               });
             });
-          });
+          }
         }
-        return { query: input.query, searched: ms.map(function (m) { return m.masechta; }), text: want || 'all', paragraphs_matched: total, per_masechta_and_text: counts, samples: hits,
-          note: 'Matching ignores nikkud. Snippets are shown without nikkud; read_source gives the pointed text.' };
+        return { query: input.query, searched: ms.map(function (m) { return m.masechta; }), text: want || 'all but the delivered English', paragraphs_matched: total, per_masechta_and_text: counts, samples: hits,
+          note: 'Matching ignores nikkud. Snippets are shown without nikkud; read_source gives the pointed text. Commentary of record: Tosafos on Meilah, the Rosh on Tamid, the Rambam on Kinnim and Middos, Rashi elsewhere; the others are secondary.' };
+      }
+
+      /* MDY's own Bechoros volume, English only: searched on request and beside the house corpus, always labelled as not house style */
+      async function searchBechoros(input) {
+        var ix = await index(), m = ix.masechtos.filter(function (x) { return x.masechta === 'Bechoros'; })[0];
+        if (!m || !m.texts.delivered) return { error: 'Bechoros is not in the library.' };
+        var warn = "MDY's own in-house Bechoros: NOT Aleh Zayis work and NOT our house style (different transliteration system, lower-case Mishnah/Baraisa, contractions, other spellings). Use it for content and to see how MDY put something; never as precedent for how we write.";
+        var raw = String(input.query || '').trim(), q = hnorm(raw);
+        if (!q) return { error: 'empty query' };
+        if (/[א-ת]/.test(q)) return { masechta: 'Bechoros', warning: warn, matches: 0, note: 'Bechoros is English only (its Hebrew could not be recovered from the print PDF). Search it in English.' };
+        var T = await textOf(m, 'delivered'), lim = num(input.limit, 1, 40, 15), hits = [], total = 0, per = {};
+        Object.keys(T.amudim).forEach(function (a) {
+          T.amudim[a].split(/\n+/).forEach(function (para) {
+            var n = hnorm(para), at = n.indexOf(q);
+            if (at < 0) return;
+            total++; per[a] = (per[a] || 0) + 1;
+            if (hits.length < lim) hits.push({ daf: a, english: (at > 300 ? '…' : '') + cut(n.length === para.length ? para.slice(Math.max(0, at - 300)) : para, 700) });
+          });
+        });
+        return { masechta: 'Bechoros', producer: 'MDY (in-house), not Aleh Zayis', warning: warn, matches: total, amudim_with_matches: Object.keys(per).length, samples: hits,
+          note: 'English only, recovered from the print PDF, so word order can be slightly disturbed where the Hebrew stood. read_source with masechta Bechoros (text "delivered") gives a whole amud.' };
       }
 
       function tanach() { return TAN || (TAN = io.json('tanach.json')); }
@@ -1486,7 +1568,8 @@
       }
 
       return {
-        labels: { read_source: 'Reading the source texts', search_sources: 'Searching the Gemara, Rashi and Mesivta', lookup_pasuk: 'Looking up the pasuk',
+        extra: { bechoros: searchBechoros },
+        labels: { read_source: 'Reading the source texts', search_sources: 'Searching the source texts and commentaries', lookup_pasuk: 'Looking up the pasuk',
           search_instructions: 'Searching the skill instructions and rulings', read_instructions: 'Reading the skill instructions' },
         tools: { read_source: readSource, search_sources: searchSources, lookup_pasuk: lookupPasuk, search_instructions: searchInstructions, read_instructions: readInstructions }
       };
@@ -1551,6 +1634,7 @@
         })
       };
     }
+    if (name === 'search_corpus' && input.masechta && /^(bech|bchor|בכור)/i.test(String(input.masechta).trim())) return ASKX_APP.extra.bechoros(input);
     if (name === 'search_corpus' || name === 'search_headers') {
       var idx = await corpusIndex();
       var names = idx.masechtos.map(function (x) { return x.name; }), want = names;
@@ -1567,7 +1651,7 @@
         var lres = lineSearch(want.map(function (m) { return (S.lines || {})[m] || []; }), q, true);
         var per = {}, exact = 0;
         res.groups.forEach(function (gr) { gr.hits.forEach(function (h) { per[h.m] = (per[h.m] || 0) + 1; if (gr.exact) exact++; }); });
-        return {
+        var out = {
           corpus_covers: names, searched: want, occurrences_per_masechta: per,
           total_occurrences: res.total, capped: res.capped || undefined, exact_phrase_chunks: exact, renderings_found: res.groups.length,
           renderings: res.groups.slice(0, askNum(input.limit, 1, 40, 15)).map(function (gr) {
@@ -1579,8 +1663,13 @@
           english_lines_with_no_hebrew_before_them: lres.total,
           english_line_samples: lres.groups.slice(0, 10).map(function (gr) {
             return { english: askCut(gr.rich ? askPlain(gr.rich) : gr.text, 700), uses: gr.items.length, places: askPlaces(gr.items, 4) };
-          })
+          }),
+          also_available: 'Bechoros (MDY in-house, not house style): search_corpus with masechta "Bechoros". Whole delivered amudim: read_source with text "delivered".'
         };
+        if (!input.masechta && !hasHe(q)) {
+          try { var bx = await ASKX_APP.extra.bechoros({ query: q, limit: 3 }); if (bx.matches) out.mdy_bechoros_not_house_style = { matches: bx.matches, warning: bx.warning, samples: bx.samples }; } catch (e) { /* Bechoros is optional */ }
+        }
+        return out;
       }
       if (hasHe(q)) return { error: 'Headers are in English; search with English words.' };
       for (var k = 0; k < want.length; k++) await loadHeaders(want[k]);

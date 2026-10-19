@@ -20,7 +20,8 @@ window.MDY_CONFIG = {
      A volume shows from its 'from' date (Israel time) until every amud in it is Final. */
   volumes: [
     { name: 'Kerisos', masechtos: ['Kerisos'], from: '' },
-    { name: 'Meilah volume', sub: 'Meilah \u00b7 Kinnim \u00b7 Tamid \u00b7 Middos', masechtos: ['Meilah', 'Kinnim', 'Tamid', 'Middos'], from: '2026-10-25' }
+    { name: 'Meilah', masechtos: ['Meilah'], from: '2026-10-25' },
+    { name: 'Kinnim \u2013 Tamid \u2013 Middos', sub: 'Kinnim \u00b7 Tamid \u00b7 Middos', masechtos: ['Kinnim', 'Tamid', 'Middos'], from: '2026-10-25' }
   ],
   /* Ask Claude: the team's relay to the Claude API. It holds the key and checks the person's Aleh Zayis sign-in. */
   askRelay: 'https://mdy-claude.yaakovbressler1.workers.dev/',
