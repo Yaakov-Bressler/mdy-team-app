@@ -1845,7 +1845,7 @@
   var askSelHooked = false, askSyncBtns = null;
   function askStatus(t) { S.ask.status = t; var el = $('#askStatus'); if (el) el.textContent = t; }
   function screenAsk() {
-    frame({ title: 'Ask Chaim Levy', tab: 'more', kicker: 'AI assistant · style, process and the corpus' });
+    frame({ title: 'Ask Chaim Levy', tab: 'more', kicker: 'AI assistant · style, the texts and the corpus' });
     var A = S.ask || (S.ask = { convo: [], items: [], busy: false });
     setView('<div class="ask-id"><span class="ask-av" aria-hidden="true"><img src="icons/chaim-levy.jpg" alt=""><b>AI</b></span><div><p class="ask-idt">Chaim Levy <span class="ask-ai">AI assistant</span></p>' +
       '<p class="note">Chaim Levy is an AI, not a person on the team. It runs on Claude, searches House Rulings, the Style Guide, the Guidelines and the corpus before it answers, and says where each answer comes from.</p></div></div>' +
@@ -1856,7 +1856,7 @@
       '<div class="ask-ed" id="askQ" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Your question" dir="auto" spellcheck="true" ' +
       'data-ph="Ask a question, or paste a passage to check…"></div></div>' +
       '<button class="btn" type="submit" id="askGo">Ask</button></form>' +
-      '<div class="ask-foot"><p class="note">AI-generated answers, for style, process, edits and corpus reports only. Bold and italics (the B and I buttons, Ctrl+B, Ctrl+I, or pasted from Word) are kept. Answers can be wrong; the rulebooks and the overseeing editor have the final word.</p>' +
+      '<div class="ask-foot"><p class="note">AI-generated answers on style, the texts, the corpus and the work itself. Bold and italics (the B and I buttons, Ctrl+B, Ctrl+I, or pasted from Word) are kept. Answers can be wrong; the rulebooks and the overseeing editor have the final word.</p>' +
       '<button type="button" class="btn ghost" data-act="asknew">New conversation</button></div>');
     renderAsk(false);
     var ta = $('#askQ'), fmtBtns = document.querySelectorAll('#askForm .ask-tb button');
