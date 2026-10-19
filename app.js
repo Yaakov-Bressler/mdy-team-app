@@ -1291,6 +1291,7 @@
       if (/style-guide|terminology|phrase-book|definitions\.md|pshat-checklist/.test(n)) return 'Level 6: the style guide and its satellites';
       if (/^mdy-proofreader\//.test(n)) return 'Proofreading rules (the proofreader\'s pass; the Transliteration List outranks her habits)';
       if (/^mdy-graphics\//.test(n)) return 'Graphics instructions';
+      if (/\/handback-(?!replies)[^\/]*\.md$/.test(n)) return 'Handback: a write-up of one editor\'s pass on one early draft. A ruling it states or marks as one is level 3; a general rule it draws from a few edits is evidence only, ranked below the delivered Temurah and Kerisos volumes, and never grounds on its own for deleting a form the volumes use regularly (rulings.md, fourth qualification; R0053)';
       if (/^mdy-writer\//.test(n)) return 'Writer guidance, drawn from the rulings and the delivered Finals';
       return 'Editor guidance';
     }
@@ -1534,6 +1535,7 @@
             if (hnorm(s.path.join(' ')).indexOf(q) >= 0) sc += 2;
             if (d.ledger) sc *= 1.5;
             else if (/rulings\.md$/.test(d.name)) sc *= 1.25;
+            else if (/\/handback-(?!replies)[^\/]*\.md$/.test(d.name)) sc *= 0.6;
             scored.push({ d: d, s: s, sc: sc });
           });
         });
