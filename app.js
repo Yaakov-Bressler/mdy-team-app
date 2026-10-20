@@ -1144,7 +1144,9 @@
      The app runs the four searches Claude asks for, over what the Guide already reads: the rulebooks, the
      delivered corpus and its headers, and the transliteration and definitions lists. Nothing about people,
      contacts, the tracker or deadlines is ever sent. */
-  var ASK_MAX_ROUNDS = 12;
+  var ASK_MAX_ROUNDS = 16;
+  var ASK_GRACE_ROUNDS = 2;
+  var ASK_BUDGET_NOTE = 'You have reached the search limit for this question. Do not call any more tools. Write your answer now from what you have already found. Where something could not be confirmed, say so briefly and say what the editor could check.';
   var ASK_LABEL = { search_rules: 'Searching the rulebooks', search_corpus: 'Searching the delivered volumes',
     search_headers: 'Searching the headers', lookup_terms: 'Checking the transliteration and definitions lists' };
   var ASK_TRIES = ['When do we write “may” and when “can”?', 'How was תא שמע rendered in each masechta?',
@@ -1921,7 +1923,7 @@
     renderAsk(true);
     var turn = A.convo.concat([{ role: 'user', content: q }]);
     try {
-      for (var round = 0; round < ASK_MAX_ROUNDS; round++) {
+      for (var round = 0; round < ASK_MAX_ROUNDS + ASK_GRACE_ROUNDS; round++) {
         var j = await askRelay(turn);
         var content = j.content || [];
         turn.push({ role: 'assistant', content: content });
@@ -1933,17 +1935,28 @@
           return;
         }
         var results = [];
+        var spent = round >= ASK_MAX_ROUNDS - 1;
         for (var k = 0; k < uses.length; k++) {
           var u = uses[k], out;
-          askStatus((ASK_LABEL[u.name] || 'Searching') + askWhat(u.input) + '…');
-          try { out = await askTool(u.name, u.input, askStatus); } catch (e) { out = { error: String(e && e.message || e) }; }
+          if (round >= ASK_MAX_ROUNDS) {
+            out = { error: 'Search limit reached. No more searches are available for this question; answer now from what you already found.' };
+          } else {
+            askStatus((ASK_LABEL[u.name] || 'Searching') + askWhat(u.input) + '…');
+            try { out = await askTool(u.name, u.input, askStatus); } catch (e) { out = { error: String(e && e.message || e) }; }
+          }
           var s = JSON.stringify(out);
           results.push({ type: 'tool_result', tool_use_id: u.id, content: s.length > 14000 ? s.slice(0, 14000) + '…(cut)' : s });
         }
+        if (spent) results.push({ type: 'text', text: ASK_BUDGET_NOTE });
         turn.push({ role: 'user', content: results });
-        askStatus('Reading what it found…');
+        askStatus(spent ? 'Writing the answer…' : 'Reading what it found…');
       }
-      A.items.push({ k: 'e', t: 'That took too many searches. Try a narrower question.' });
+      var said = turn.slice(A.convo.length + 1).filter(function (m) { return m.role === 'assistant' && Array.isArray(m.content); })
+        .map(function (m) { return m.content.filter(function (b) { return b.type === 'text'; }).map(function (b) { return b.text; }).join('\n\n'); })
+        .join('\n\n').trim();
+      var fallback = (said ? said + '\n\n' : '') + '_I used up my searches before I could finish checking this. The notes above are what I found so far; ask me a follow-up and I will pick up from here._';
+      A.items.push({ k: 'a', h: askMd(fallback) });
+      A.convo = A.convo.concat([{ role: 'user', content: q }, { role: 'assistant', content: fallback }]);
     } catch (e) {
       A.items.push({ k: 'e', t: (e && e.message) || 'Something went wrong.' });
     } finally {
