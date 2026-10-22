@@ -1168,14 +1168,42 @@
     if (!force && exp * 1000 < Date.now() + 5 * 60000) return idToken(true);
     return r.idToken;
   }
+  /* A dropped connection (network blip, phone or laptop asleep mid-answer) throws "Failed to fetch".
+     Each relay call is stateless (the whole turn is resent), so it is always safe to send it again. */
+  var ASK_RETRY_WAITS = [1500, 4000, 9000];
+  var ASK_RETRY_STATUS = [408, 425, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524, 529];
+  function askSleep(ms) { return new Promise(function (res) { setTimeout(res, ms); }); }
+  function askAwake() {
+    return new Promise(function (res) {
+      if (!document.hidden) { res(); return; }
+      function f() { if (!document.hidden) { document.removeEventListener('visibilitychange', f); res(); } }
+      document.addEventListener('visibilitychange', f);
+    });
+  }
   async function askRelay(messages, retried) {
-    var tok = await idToken(!!retried);
-    var res = TEST && TEST.relay ? await TEST.relay(messages, tok)
-      : await fetch(C.askRelay, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + tok }, body: JSON.stringify({ messages: messages }) });
-    var j = await res.json().catch(function () { return {}; });
-    if (res.status === 401 && !retried) return askRelay(messages, true);
-    if (!res.ok) throw new Error(j.error || ('Claude is not available right now (' + res.status + ').'));
-    return j;
+    var body = JSON.stringify({ messages: messages }), last = null;
+    for (var a = 0; a <= ASK_RETRY_WAITS.length; a++) {
+      if (a) {
+        askStatus('Connection dropped. Trying again…');
+        await askAwake();
+        await askSleep(ASK_RETRY_WAITS[a - 1]);
+      }
+      var tok = await idToken(!!retried), res;
+      try {
+        res = TEST && TEST.relay ? await TEST.relay(messages, tok)
+          : await fetch(C.askRelay, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + tok }, body: body });
+      } catch (e) {
+        last = new Error('The connection to Chaim Levy dropped.'); last.resumable = true;
+        continue;
+      }
+      var j = await res.json().catch(function () { return {}; });
+      if (res.status === 401 && !retried) return askRelay(messages, true);
+      if (res.ok) return j;
+      last = new Error(j.error || ('Claude is not available right now (' + res.status + ').'));
+      if (ASK_RETRY_STATUS.indexOf(res.status) < 0) throw last;
+      last.resumable = true;
+    }
+    throw last;
   }
 
   async function wordXml(item) {
@@ -1816,7 +1844,8 @@
   function askLogHtml(A) {
     var h = A.items.map(function (it) {
       if (it.k === 'u') return '<div class="ask-m u" dir="auto">' + (it.h || esc(it.t)) + '</div>';
-      if (it.k === 'e') return '<div class="ask-m e">' + esc(it.t) + '</div>';
+      if (it.k === 'e') return '<div class="ask-m e">' + esc(it.t) + (it.resume ? ' This happens when the network blips or the phone or computer goes to sleep while he is working. Nothing he found is lost: <strong>Try again</strong> picks up where he stopped.' : '') + '</div>' +
+        (it.resume && A.pending && !A.busy ? '<div class="ask-retry"><button type="button" class="chipbtn" data-act="askresume">Try again</button></div>' : '');
       return '<div class="ask-who"><span class="ask-av sm" aria-hidden="true"><img src="icons/chaim-levy.jpg" alt=""></span>Chaim Levy <span class="ask-ai">AI</span></div><div class="ask-m a">' + it.h + '</div>';
     }).join('');
     if (!A.items.length) h = '<div class="ask-m a"><p>What would you like to know? A few things to try:</p><div class="ask-tries">' +
@@ -1835,7 +1864,7 @@
   // (a reload or a cold start already begins empty, since the conversation is kept only in memory)
   function askReset() {
     if (!S.ask || S.ask.busy) return false;
-    S.ask.convo = []; S.ask.items = []; S.ask.draft = '';
+    S.ask.convo = []; S.ask.items = []; S.ask.draft = ''; S.ask.pending = null;
     renderAsk(false);
     var aq = $('#askQ'); if (aq) aq.innerHTML = '';
     return true;
@@ -1917,13 +1946,25 @@
     if (text != null) { q = String(text).trim(); uh = esc(q); }
     else { var runs = ta ? askRuns(ta, false) : []; q = askRunsMd(runs).trim(); uh = askRunsHtml(runs, false); }
     if (!q || !A || A.busy) return;
-    A.busy = true; A.status = 'Thinking…'; A.draft = '';
+    A.busy = true; A.status = 'Thinking…'; A.draft = ''; A.pending = null;
+    A.items.forEach(function (it) { if (it.k === 'e') it.resume = false; });
     if (ta) { ta.innerHTML = ''; if (askSyncBtns) askSyncBtns(); }
     A.items.push({ k: 'u', t: q, h: uh });
     renderAsk(true);
-    var turn = A.convo.concat([{ role: 'user', content: q }]);
+    await askWork(A.convo.concat([{ role: 'user', content: q }]), 0, q);
+  }
+  async function askResume() {
+    var A = S.ask, P = A && A.pending;
+    if (!P || A.busy) return;
+    A.pending = null; A.busy = true; A.status = 'Picking up where he stopped…';
+    for (var i = A.items.length - 1; i >= 0; i--) { if (A.items[i].k === 'e' && A.items[i].resume) { A.items.splice(i, 1); break; } }
+    renderAsk(true);
+    await askWork(P.turn, P.round, P.q);
+  }
+  async function askWork(turn, round0, q) {
+    var A = S.ask, round = round0;
     try {
-      for (var round = 0; round < ASK_MAX_ROUNDS + ASK_GRACE_ROUNDS; round++) {
+      for (; round < ASK_MAX_ROUNDS + ASK_GRACE_ROUNDS; round++) {
         var j = await askRelay(turn);
         var content = j.content || [];
         turn.push({ role: 'assistant', content: content });
@@ -1958,7 +1999,9 @@
       A.items.push({ k: 'a', h: askMd(fallback) });
       A.convo = A.convo.concat([{ role: 'user', content: q }, { role: 'assistant', content: fallback }]);
     } catch (e) {
-      A.items.push({ k: 'e', t: (e && e.message) || 'Something went wrong.' });
+      var resumable = !!(e && e.resumable);
+      A.items.push({ k: 'e', t: (e && e.message) || 'Something went wrong.', resume: resumable });
+      if (resumable) A.pending = { turn: turn, round: round, q: q };
     } finally {
       A.busy = false;
       renderAsk(true);
@@ -2721,6 +2764,7 @@
     if (act === 'fbmore') { route(); return; }
     if (act === 'pickfile') { $('#sFile').click(); return; }
     if (act === 'send') { doSend(); return; }
+    if (act === 'askresume') { askResume(); return; }
     if (act === 'asknew') { if (askReset()) { var aq = $('#askQ'); if (aq) aq.focus(); } return; }
     if (act === 'asktry') { var tq = el.textContent; if (/…$/.test(tq)) { var at = $('#askQ'); if (at) { at.textContent = tq.replace(/\s*…$/, ' '); S.ask.draft = at.innerHTML; at.focus(); var sl = window.getSelection(), rg = document.createRange(); rg.selectNodeContents(at); rg.collapse(false); sl.removeAllRanges(); sl.addRange(rg); } } else askSubmit(tq); return; }
     if (act === 'again') { S.submit = null; location.hash = '#/submit'; route(); return; }

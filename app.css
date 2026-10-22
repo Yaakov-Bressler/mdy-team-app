@@ -290,6 +290,7 @@ input::placeholder, textarea::placeholder { color: #7b8189; }
 .ask-m.a th { background: #f7f5f0; font-weight: 700; }
 .ask-m.s { font-size: 14px; color: var(--gold-text); font-style: italic; padding: 0 4px; }
 .ask-m.e { background: #fbeceb; border: 1px solid #efc2bd; color: var(--danger); border-radius: 12px; padding: 10px 14px; font-size: 14.5px; }
+.ask-retry { margin: -4px 0 10px; }
 .ask-tries { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
 .ask-tries .chipbtn { font-weight: 600; text-align: left; height: auto; padding: 7px 14px; line-height: 1.3; flex: 0 1 auto; }
 .ask-form { position: sticky; bottom: calc(76px + var(--safe-b)); z-index: 3; display: flex; gap: 8px; align-items: flex-end; background: var(--ground); padding: 8px 0 4px; }
