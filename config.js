@@ -23,6 +23,12 @@ window.MDY_CONFIG = {
     { name: 'Meilah', masechtos: ['Meilah'], from: '2026-10-25' },
     { name: 'Kinnim \u2013 Tamid \u2013 Middos', sub: 'Kinnim \u00b7 Tamid \u00b7 Middos', masechtos: ['Kinnim', 'Tamid', 'Middos'], from: '2026-10-25' }
   ],
+  /* Masechtos that run on their own, shorter list of stages instead of every choice on the tracker's Stage column.
+     The Meilah volume has eight (YB, 26 Oct 2026). Kerisos keeps the full list. */
+  workflows: [
+    { name: 'Meilah volume', masechtos: ['Meilah', 'Kinnim', 'Tamid', 'Middos'],
+      stages: ['Open', 'Generated', 'Edited', 'Mevukar', 'Kramer', 'Edited 2', 'Proofread', 'Final'] }
+  ],
   /* Ask Claude: the team's relay to the Claude API. It holds the key and checks the person's Aleh Zayis sign-in. */
   askRelay: 'https://mdy-claude.yaakovbressler1.workers.dev/',
   chatUrl: 'https://chat.google.com/room/AAQAnjn0HSU?cls=5',

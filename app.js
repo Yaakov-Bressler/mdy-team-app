@@ -36,6 +36,12 @@
       .toLowerCase();
   }
   function stageColor(s) { return C.stageColors[s] || '#8a8f98'; }
+  /* the stages a masechta (or a set of masechtos) runs on: its own list from C.workflows, else every choice on the tracker */
+  function stagesFor(ms) {
+    var list = [].concat(ms || []);
+    var wf = (C.workflows || []).filter(function (w) { return list.length && list.every(function (m) { return w.masechtos.indexOf(m) > -1; }); })[0];
+    return wf ? wf.stages : (S.stages || Object.keys(C.stageColors));
+  }
   function stageChip(s, label) {
     var c = stageColor(s);
     return '<span class="stage" style="background:' + c + ';color:' + (LIGHT[c] ? '#1a1814' : '#fff') + '">' + esc(label || s || '—') + '</span>';
@@ -276,7 +282,7 @@
       var txt = (d.title + ' ' + d.lines.map(function (l) { return l.value; }).join(' '));
       var mas = C.masechtos.filter(function (m) { return txt.indexOf(m) > -1; })[0];
       if (!mas) return;
-      var list = S.stages || [];
+      var list = stagesFor(mas);
       var target = stg ? list.indexOf(stg.stage) : -1;
       S.tracker.forEach(function (r) {
         if (r.masechta !== mas) return;
@@ -304,8 +310,8 @@
     if (r.workflow) bits.push(r.workflow + ' workflow');
     return bits.join(' · ');
   }
-  function nextStage(s) {
-    var list = S.stages || [];
+  function nextStage(s, m) {
+    var list = stagesFor(m);
     var i = list.indexOf(s);
     return i > -1 && i < list.length - 1 ? list[i + 1] : s;
   }
@@ -2097,7 +2103,8 @@
         if (st === 'Final') done++;
       });
       if (!total || done >= total) return '';
-      var order = (S.stages || []).filter(function (s) { return stg[s]; }).concat(Object.keys(stg).filter(function (s) { return (S.stages || []).indexOf(s) < 0; }));
+      var vlist = stagesFor(v.masechtos);
+      var order = vlist.filter(function (s) { return stg[s]; }).concat(Object.keys(stg).filter(function (s) { return vlist.indexOf(s) < 0; }));
       return '<section class="card vol" aria-label="' + esc(v.name) + ' by stage"><div class="volhead"><b>' + esc(v.name) + '</b>' + (v.sub ? '<span class="note">' + esc(v.sub) + '</span>' : '') +
         '<span class="note volcount">' + done + ' of ' + total + ' in Final</span></div>' +
         '<div class="bar">' + order.map(function (s) { return '<i style="flex:' + stg[s] + ';background:' + stageColor(s) + '" title="' + esc(s + ': ' + stg[s]) + '"></i>'; }).join('') + '</div>' +
@@ -2119,7 +2126,8 @@
     var shown = rows.filter(function (r) { return r.masechta === m; });
     var counts = {};
     shown.forEach(function (r) { var st = r.stage === 'Closed' ? 'Final' : r.stage; counts[st] = (counts[st] || 0) + 1; });
-    var order = (S.stages || []).filter(function (s) { return counts[s]; }).concat(Object.keys(counts).filter(function (s) { return (S.stages || []).indexOf(s) < 0; }));
+    var mlist = stagesFor(m);
+    var order = mlist.filter(function (s) { return counts[s]; }).concat(Object.keys(counts).filter(function (s) { return mlist.indexOf(s) < 0; }));
     var done = counts.Final || 0;
     var h = volumeBanner(rows, m) + '<section class="card" aria-label="Progress"><div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px"><b>' + esc(m) + ' · ' + shown.length + ' rows</b><span class="note">' + done + ' final</span></div>' +
       '<div class="bar">' + order.map(function (s) { return '<i style="flex:' + counts[s] + ';background:' + stageColor(s) + '" title="' + esc(s) + '"></i>'; }).join('') + '</div>' +
@@ -2135,7 +2143,7 @@
   }
 
   function openMoveSheet(row) {
-    var list = S.stages || Object.keys(C.stageColors);
+    var list = stagesFor(row.masechta);
     var w = $('#sheet');
     w.innerHTML = '<div class="sheet" role="dialog" aria-modal="true" aria-label="Move ' + esc(row.title) + '">' +
       '<h2>Move ' + esc(row.title) + '</h2><p class="note">Now at ' + esc(row.stage) + '. Pick its new stage.</p>' +
@@ -2176,7 +2184,7 @@
     if (!s || (rowId && s.rowId !== rowId) || s.sent) {
       var mine = rows.filter(isMine);
       var row0 = rows.filter(function (r) { return r.id === rowId; })[0] || mine[0] || null;
-      s = S.submit = { rowId: row0 ? row0.id : null, showAll: !!(row0 && !isMine(row0)), stage: row0 ? nextStage(row0.stage) : '', file: null, name: '', nameTouched: false, role: 'Editors', person: null, note: '', sent: false, busy: false };
+      s = S.submit = { rowId: row0 ? row0.id : null, showAll: !!(row0 && !isMine(row0)), stage: row0 ? nextStage(row0.stage, row0.masechta) : '', file: null, name: '', nameTouched: false, role: 'Editors', person: null, note: '', sent: false, busy: false };
     }
     await renderSubmit();
   }
@@ -2227,7 +2235,7 @@
       } catch (e) { folderHtml = errBox(e); }
     }
     if (row && !s.nameTouched) s.name = suggestName(row, s.file);
-    var stages = S.stages || [];
+    var stages = row ? stagesFor(row.masechta) : (S.stages || []);
     var ready = row && s.file && s.name && s.parentId && !s.busy;
     var h = '<section class="field"><label class="lbl" for="sAmud">1. Which amud?</label><select id="sAmud" data-act="samud">' + opts + '</select>' +
       '<label style="display:flex;gap:8px;align-items:center;font-size:14.5px;min-height:36px"><input type="checkbox" data-act="sall"' + (s.showAll ? ' checked' : '') + ' style="width:20px;height:20px"> Show every amud, not just mine</label></section>';
@@ -2774,7 +2782,7 @@
     if (el.id === 'sFile' && s) { s.file = el.files && el.files[0] || null; s.nameTouched = false; renderSubmit(); return; }
     var act = el.getAttribute && el.getAttribute('data-act');
     if (!s || !act) return;
-    if (act === 'samud') { s.rowId = el.value || null; var r = (S.tracker || []).filter(function (x) { return x.id === s.rowId; })[0]; s.stage = r ? nextStage(r.stage) : ''; s.nameTouched = false; s.person = null; renderSubmit(); }
+    if (act === 'samud') { s.rowId = el.value || null; var r = (S.tracker || []).filter(function (x) { return x.id === s.rowId; })[0]; s.stage = r ? nextStage(r.stage, r.masechta) : ''; s.nameTouched = false; s.person = null; renderSubmit(); }
     else if (act === 'sall') { s.showAll = el.checked; renderSubmit(); }
     else if (act === 'sstage') { s.stage = el.value; renderSubmit(); }
     else if (act === 'srole') { s.role = el.value; s.person = null; renderSubmit(); }
