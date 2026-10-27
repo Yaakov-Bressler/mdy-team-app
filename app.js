@@ -272,26 +272,109 @@
     if (i > -1) s.splice(i, 1); else s.push(String(id));
     try { localStorage.setItem('mdy-stars', JSON.stringify(s)); } catch (e) { /* ignore */ }
   }
+  /* Which tracker rows a deadline covers, read from its Masechta, Amudim and "Done when" columns exactly as the site's
+     deadlines core reads them (Claude/Deadlines/deadlines-core.js, VERSION 2026-10-26-01), so "My work" and the site's tally
+     agree. A Masechta can be a volume ("Meilah volume" = Meilah, Kinnim, Tamid, Middos) or a list ("Meilah, Kinnim");
+     Amudim takes "all", ranges, "all except ...", and terms that name a masechta ("Meilah 2a-10a, Kinnim all"). */
+  var DL_VOLUMES = { 'meilah volume': ['Meilah', 'Kinnim', 'Tamid', 'Middos'] };
+  var DL_STAGES = {
+    New: ['Open', 'Generated', 'Edited', 'Reviewed', 'Mevukar', 'Kramer', 'Post Kramer', 'Edited 2', 'Edited 3', 'Review 2', 'Proofread', 'Check', 'Final'],
+    Old: ['Open', 'Written', 'Run', 'Edited', 'Mevukar', 'Kramer', 'Post Kramer', 'Edited 2', 'Mevukar 2', 'Proofread', 'Closed']
+  };
+  var DL_TARGETS = {
+    'Edited (first-round editing)': { New: 'Edited', Old: 'Edited' },
+    'Mevukar (content editors)': { New: 'Mevukar', Old: 'Mevukar' },
+    "Post Kramer (back from R' Kramer)": { New: 'Post Kramer', Old: 'Post Kramer' },
+    'Proofread': { New: 'Proofread', Old: 'Proofread' },
+    'Final': { New: 'Final', Old: 'Closed' }
+  };
+  function dlMasechtos(m) {
+    var t = String(m == null ? '' : m).trim();
+    if (!t) return [];
+    var v = DL_VOLUMES[t.toLowerCase()];
+    if (v) return v.slice();
+    var out = [];
+    t.split(/\s*(?:[,;+&\/]|\band\b)\s*/i).forEach(function (x) { x = x.trim(); if (x && out.indexOf(x) < 0) out.push(x); });
+    return out;
+  }
+  function dlWf(w) { return w === 'Old' ? 'Old' : 'New'; }
+  function dlRank(stage, w) {
+    if (stage === 'Final' || stage === 'Closed') return 999;
+    return DL_STAGES[dlWf(w)].indexOf(stage);
+  }
+  function dlAmud(s) {
+    var m = String(s || '').toLowerCase().match(/(\d+)\s*([ab])(?:\s*\(\s*(\d+)\s*\))?/);
+    if (!m) return null;
+    return { part: m[3] ? +m[3] : 0, ord: +m[1] * 2 + (m[2] === 'b' ? 1 : 0) };
+  }
+  function dlSpec(spec) {
+    var t = String(spec == null ? '' : spec).trim().toLowerCase().replace(/[\u2013\u2014]/g, '-');
+    var parts = t.split(/\bexcept\b|\bbut not\b|\bwithout\b/);
+    function terms(str) {
+      var out = [];
+      (str || '').split(/[,;\n]+/).forEach(function (tok) {
+        tok = tok.trim().replace(/^and\s+/, '');
+        if (!tok) return;
+        var mas = null, mm = tok.match(/^([a-z][a-z'\u2019]*)\s+(?=\d|all\b|everything\b|whole\b|entire\b)/);
+        if (mm && !/^(all|everything|whole|entire|and)$/.test(mm[1])) { mas = mm[1]; tok = tok.slice(mm[0].length); }
+        function push(x) { if (mas) x.mas = mas; out.push(x); }
+        if (/^(all|everything|whole|entire)/.test(tok)) { push({ all: true }); return; }
+        var r = tok.split(/\s*(?:-|\bto\b|\bthrough\b)\s*/);
+        if (r.length === 2) { var a = dlAmud(r[0]), b = dlAmud(r[1]); if (a && b) { push({ from: a, to: b }); return; } }
+        var one = dlAmud(tok);
+        if (one) push({ one: one });
+      });
+      return out;
+    }
+    var inc = terms(parts[0]);
+    if (!inc.length && parts.length > 1) inc = [{ all: true }];
+    return { inc: inc, exc: parts.length > 1 ? terms(parts.slice(1).join(',')) : [] };
+  }
+  function dlHit(term, a, mas) {
+    if (term.mas && term.mas !== String(mas || '').toLowerCase()) return false;
+    if (term.all) return true;
+    if (term.one) return term.one.ord === a.ord && (!term.one.part || term.one.part === a.part);
+    if (term.from) {
+      var lo = term.from, hi = term.to;
+      if (a.ord < lo.ord || a.ord > hi.ord) return false;
+      if (a.ord === lo.ord && lo.part && a.part && a.part < lo.part) return false;
+      if (a.ord === hi.ord && hi.part && a.part && a.part > hi.part) return false;
+      return true;
+    }
+    return false;
+  }
+  /* the tracker rows a deadline covers that have not yet reached its stage */
+  function dlRows(d, rows) {
+    var f = d.f || {}, target = String(f.Target || '').trim();
+    if (/^no tally$/i.test(target)) return [];
+    var list = dlMasechtos(f.Masechta);
+    if (!list.length) { /* older rows with no Masechta: the masechta named in the deadline's text */
+      var txt = d.title + ' ' + d.lines.map(function (l) { return l.value; }).join(' ');
+      list = C.masechtos.filter(function (m) { return txt.indexOf(m) > -1; }).slice(0, 1);
+    }
+    if (!list.length) return [];
+    var spec = dlSpec(f.Amudim == null || String(f.Amudim).trim() === '' ? 'all' : f.Amudim), named = {};
+    spec.inc.forEach(function (t) { if (t.mas) named[t.mas] = 1; });
+    var anyNamed = Object.keys(named).length > 0;
+    var want = list.map(function (m) { return m.toLowerCase(); }).filter(function (m) { return !anyNamed || named[m]; });
+    var stage = DL_TARGETS[target] || null;
+    return rows.filter(function (r) {
+      var mas = String(r.masechta || '').toLowerCase();
+      if (want.indexOf(mas) < 0) return false;
+      var a = dlAmud(r.title);
+      if (!a) return false;
+      if (!spec.inc.some(function (t) { return dlHit(t, a, mas); }) || spec.exc.some(function (t) { return dlHit(t, a, mas); })) return false;
+      if (stage) { var w = dlWf(r.workflow); if (dlRank(r.stage, w) >= dlRank(stage[w], w)) return false; }
+      return true;
+    });
+  }
   function markFromDeadlines() {
     S.fromDl = {};
     if (!S.tracker || !S.deadlines) return;
     S.deadlines.filter(function (d) { return (d.days == null || d.days >= 0) && deadlineIsMine(d); }).forEach(function (d) {
-      var am = d.lines.filter(function (l) { return l.amudim; })[0];
-      if (!am) return;
-      var stg = d.lines.filter(function (l) { return l.stage; })[0];
-      var txt = (d.title + ' ' + d.lines.map(function (l) { return l.value; }).join(' '));
-      var mas = C.masechtos.filter(function (m) { return txt.indexOf(m) > -1; })[0];
-      if (!mas) return;
-      var list = stagesFor(mas);
-      var target = stg ? list.indexOf(stg.stage) : -1;
-      S.tracker.forEach(function (r) {
-        if (r.masechta !== mas) return;
-        var ra = rowAmud(r);
-        if (!ra) return;
-        var hit = am.amudim.some(function (a) { return a.k === ra.k && (a.part == null || a.part === ra.part); });
-        if (!hit) return;
-        if (target > -1 && list.indexOf(r.stage) >= target) return;
-        S.fromDl[r.id] = d;
+      dlRows(d, S.tracker).forEach(function (r) {
+        /* an amud under two of your deadlines shows the earlier one */
+        if (!S.fromDl[r.id] || (d.due && S.fromDl[r.id].due && d.due < S.fromDl[r.id].due)) S.fromDl[r.id] = d;
       });
     });
   }
@@ -349,16 +432,19 @@
         lines.push(line);
       }
       var due = dueCol ? f[dueCol.name] : null;
-      return { id: it.id, title: f.Title || '', due: due, days: daysUntil(due), lines: lines };
+      return { id: it.id, f: f, title: f.Title || '', due: due, days: daysUntil(due), lines: lines };
     }));
     items.sort(function (a, b) { return (a.due || '9') < (b.due || '9') ? -1 : 1; });
     S.deadlines = items;
     return items;
   }
+  /* yours when your name is in its Who (Owner) column or its title. Not the Details: they can name other people
+     ("Perakim 1-3 have their own rows (R' Langer, R' Ochs)" on an unassigned row). */
   function deadlineIsMine(d) {
     var sn = surname();
     if (!sn) return false;
-    return (d.title + ' ' + d.lines.map(function (l) { return l.value; }).join(' ')).toLowerCase().indexOf(sn) > -1;
+    var f = d.f || {};
+    return (String(f.Owner || '') + ' ' + d.title).toLowerCase().indexOf(sn) > -1;
   }
   function deadlineCard(d) {
     var job = d.lines.filter(function (l) { return l.job; })[0];
