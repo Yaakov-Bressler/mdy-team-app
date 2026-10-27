@@ -1,0 +1,49 @@
+{
+  "_note": "Tool definitions for the mdy-claude relay (Cloudflare Worker), added 28 Oct 2026. Append these five to the tools array the Worker sends to the Claude API. The app and the site page run them (ask-tools.js); the Worker only declares them. User messages may now carry content arrays with text and image blocks (attachments): the Worker must pass them through unchanged.",
+  "tools": [
+    {
+      "name": "find_files",
+      "description": "Find files in the MDY SharePoint library by name or words in them (drafts, edited amudim, Finals, sheets). Searches as the editor asking, so it only sees what they can open. Returns paths, newest first. Use it before read_file when you only know the amud (e.g. 'KER10a', 'TEM 23a Ochs').",
+      "input_schema": { "type": "object", "properties": {
+        "query": { "type": "string", "description": "Words to search for, e.g. 'KER10a' or 'KER10a_RD'." },
+        "folder": { "type": "string", "description": "Optional: only paths containing this, e.g. 'Kerisos' or 'Editors/R' Ochs'." },
+        "limit": { "type": "integer", "description": "Up to 20 (default 12)." } }, "required": ["query"] }
+    },
+    {
+      "name": "read_file",
+      "description": "Read a Word, Excel or text file from the library: the live file as it is now, not the delivered corpus. A Word file comes back numbered by paragraph (¶N, the numbers make_word_file uses), _x_ marking italics, [tracked] on paragraphs that already carry tracked changes (shown as if accepted), plus its comments. Read in parts or by paragraph range; never ask for more than you need.",
+      "input_schema": { "type": "object", "properties": {
+        "path": { "type": "string", "description": "Library path from find_files." },
+        "part": { "type": "integer", "description": "Which part (each about 9,000 characters). Default 1." },
+        "paragraphs": { "type": "string", "description": "A paragraph or range, e.g. '12' or '12-20'." } }, "required": ["path"] }
+    },
+    {
+      "name": "read_attachment",
+      "description": "Read more of a file the editor attached to the conversation (only a short beginning came with the question). Same format and paging as read_file.",
+      "input_schema": { "type": "object", "properties": {
+        "n": { "type": "integer", "description": "Attachment number, from the question." },
+        "part": { "type": "integer" },
+        "paragraphs": { "type": "string" } }, "required": ["n"] }
+    },
+    {
+      "name": "make_word_file",
+      "description": "Return a Word file to the editor with your edits as tracked changes and comments by Chaim Levy, built from a library file or an attached .docx. Give only the paragraphs you change: the full new text of each paragraph in the same form read_file showed (_x_ for italics), and/or a comment. The Hebrew must stay exactly as it is (any change to it, nikkud included, is refused), and paragraphs that already carry tracked changes are left alone. The editor gets a download button; nothing is saved to SharePoint. Up to 60 paragraphs.",
+      "input_schema": { "type": "object", "properties": {
+        "source": { "type": "string", "description": "A library path, or 'attachment N'." },
+        "name": { "type": "string", "description": "Optional file name; default is the original name with _CL." },
+        "edits": { "type": "array", "items": { "type": "object", "properties": {
+          "para": { "type": "integer", "description": "¶ number from read_file." },
+          "text": { "type": "string", "description": "The paragraph's whole new text. Leave out for a comment only." },
+          "comment": { "type": "string", "description": "A short comment in the team's register." } }, "required": ["para"] } } },
+        "required": ["source", "edits"] }
+    },
+    {
+      "name": "search_discussions",
+      "description": "Search how the team discussed a question: the MDY Gemara Team Google Chat log (Sep 2025 to Aug 2026), the Proofreading feedback sheet, and each masechta's Graphics feedback sheet. Evidence of how a decision was reached, not a ruling: cite the ruling where one exists. Never use it to report on or judge a person.",
+      "input_schema": { "type": "object", "properties": {
+        "query": { "type": "string", "description": "English, Hebrew or transliteration." },
+        "source": { "type": "string", "enum": ["all", "chat", "proofreading", "graphics"] },
+        "limit": { "type": "integer", "description": "Up to 15 (default 8) per source." } }, "required": ["query"] }
+    }
+  ]
+}

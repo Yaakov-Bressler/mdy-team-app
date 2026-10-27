@@ -303,6 +303,16 @@ input::placeholder, textarea::placeholder { color: #7b8189; }
 .ask-ed { font-size: 16px; line-height: 1.45; padding: 4px 12px 10px; min-height: 46px; max-height: 40vh; overflow-y: auto; outline: none; white-space: pre-wrap; overflow-wrap: anywhere; text-align: start; cursor: text; color: var(--ink); }
 .ask-ed:empty::before { content: attr(data-ph); color: #7b8189; pointer-events: none; }
 .ask-form .btn { flex: none; min-height: 50px; }
+.ask-acts { flex: none; display: flex; align-items: flex-end; gap: 6px; }
+.ask-clip { display: flex; align-items: center; justify-content: center; width: 44px; height: 50px; border-radius: 10px; border: 1px solid #c9c4b8; background: #fff; color: var(--navy); cursor: pointer; }
+.ask-clip:focus-within { outline: 3px solid var(--gold); outline-offset: 2px; }
+.ask-files { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 0 6px; }
+.ask-files:empty { display: none; }
+.ask-chip { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; padding: 4px 4px 4px 10px; border-radius: 999px; border: 1px solid var(--line); background: #fff; font-size: 13.5px; overflow-wrap: anywhere; }
+.ask-chip button { width: 28px; height: 28px; border: none; background: transparent; font-size: 18px; line-height: 1; cursor: pointer; color: var(--muted); }
+.ask-att { margin: 6px 0 0; font-size: 13.5px; opacity: .85; }
+.ask-dl { margin: 10px 0 0; }
+.ask-dl .btn { display: inline-flex; align-items: center; min-height: 40px; text-decoration: none; margin: 0 6px 6px 0; }
 .ask-foot { display: flex; flex-direction: column; gap: 10px; }
 .chip-ask { display: inline-flex; align-items: center; gap: 6px; text-decoration: none; }
 .chip-ask svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }

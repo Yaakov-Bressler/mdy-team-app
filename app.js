@@ -1340,6 +1340,7 @@
     if (i.amud) return ': ' + [i.masechta, i.amud, i.text].filter(Boolean).join(' ');
     if (i.ref || i.words) return ': ' + askCut(i.ref || i.words, 60);
     if (i.doc) return ': ' + askCut(i.doc, 60);
+    if (i.path || i.source) return ': ' + askCut(String(i.path || i.source).split('/').pop(), 60);
     return '';
   }
   function askCut(s, n) { s = String(s || ''); return s.length > n ? s.slice(0, n) + '…' : s; }
@@ -1354,9 +1355,9 @@
     return turn.map(function (m) {
       if (typeof m.content === 'string') return m;
       if (m.role === 'assistant') return { role: 'assistant', content: m.content.filter(function (b) { return b.type !== 'thinking' && b.type !== 'redacted_thinking'; }) };
-      return { role: 'user', content: m.content.map(function (b) {
+      return { role: 'user', content: ASKY_APP.slimBlocks(m.content.map(function (b) {
         return b.type === 'tool_result' ? { type: 'tool_result', tool_use_id: b.tool_use_id, content: '(earlier search results omitted)' } : b;
-      }) };
+      })) };
     });
   }
 
@@ -1737,9 +1738,56 @@
   });
   Object.keys(ASKX_APP.labels).forEach(function (k) { ASK_LABEL[k] = ASKX_APP.labels[k]; });
 
+  /* the second set of tools (ask-tools.js): live library files, attachments, marked-up Word files, the team chat and
+     feedback sheets. All of it runs here, as the person, through Graph; the size caps that keep the cost down live there. */
+  var PDFJS = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/';
+  function loadScript(src) { return new Promise(function (res, rej) { var sc = document.createElement('script'); sc.src = src; sc.onload = res; sc.onerror = function () { rej(new Error('Could not load ' + src)); }; document.head.appendChild(sc); }); }
+  async function pdfText(buf) {
+    if (!window.pdfjsLib) { await loadScript(PDFJS + 'pdf.min.js'); window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS + 'pdf.worker.min.js'; }
+    var pdf = await window.pdfjsLib.getDocument({ data: new Uint8Array(buf) }).promise, out = [];
+    for (var i = 1; i <= Math.min(pdf.numPages, 60); i++) {
+      var tc = await (await pdf.getPage(i)).getTextContent();
+      out.push('[page ' + i + ']\n' + tc.items.map(function (it) { return it.str + (it.hasEOL ? '\n' : ''); }).join(' '));
+    }
+    return out.join('\n');
+  }
+  function shrinkImage(file, px) {
+    return new Promise(function (res, rej) {
+      var url = URL.createObjectURL(file), img = new Image();
+      img.onload = function () {
+        var sc = Math.min(1, px / Math.max(img.naturalWidth, img.naturalHeight)), cv = document.createElement('canvas');
+        cv.width = Math.round(img.naturalWidth * sc); cv.height = Math.round(img.naturalHeight * sc);
+        cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+        URL.revokeObjectURL(url);
+        res({ type: 'image/jpeg', data: cv.toDataURL('image/jpeg', 0.8).split(',')[1] });
+      };
+      img.onerror = function () { URL.revokeObjectURL(url); rej(new Error(file.name + ' could not be opened as a picture.')); };
+      img.src = url;
+    });
+  }
+  var ASKY_APP = ASKY.create({
+    g: g, driveId: driveId, JSZip: window.JSZip, DOMParser: window.DOMParser, XMLSerializer: window.XMLSerializer,
+    download: async function (item) {
+      if (TEST && TEST.download) return TEST.download(item);
+      var url = item['@microsoft.graph.downloadUrl'] || (await g('/drives/' + (await driveId()) + '/items/' + item.id))['@microsoft.graph.downloadUrl'];
+      return (await fetch(url)).arrayBuffer();
+    },
+    json: function (name) { return askData(name); },
+    decode: function (buf) { return new TextDecoder('utf-8').decode(buf); },
+    fileBuf: function (f) { return f.arrayBuffer(); },
+    shrinkImage: shrinkImage, pdfText: pdfText,
+    masechtaFolders: async function () {
+      var out = [];
+      for (var i = 0; i < C.masechtos.length; i++) { var f = await masechtaFolder(C.masechtos[i]).catch(function () { return null; }); if (f) out.push(f.name); }
+      return out;
+    }
+  });
+  Object.keys(ASKY_APP.labels).forEach(function (k) { ASK_LABEL[k] = ASKY_APP.labels[k]; });
+
   async function askTool(name, input, onStatus) {
     input = input || {};
     if (ASKX_APP.tools[name]) return ASKX_APP.tools[name](input);
+    if (ASKY_APP.tools[name]) return ASKY_APP.tools[name](input);
     var q = String(input.query || '').trim();
     if (!q) return { error: 'empty query' };
     if (name === 'search_rules') {
@@ -1938,7 +1986,9 @@
       if (it.k === 'u') return '<div class="ask-m u" dir="auto">' + (it.h || esc(it.t)) + '</div>';
       if (it.k === 'e') return '<div class="ask-m e">' + esc(it.t) + (it.resume ? ' This happens when the network blips or the phone or computer goes to sleep while he is working. Nothing he found is lost: <strong>Try again</strong> picks up where he stopped.' : '') + '</div>' +
         (it.resume && A.pending && !A.busy ? '<div class="ask-retry"><button type="button" class="chipbtn" data-act="askresume">Try again</button></div>' : '');
-      return '<div class="ask-who"><span class="ask-av sm" aria-hidden="true"><img src="icons/chaim-levy.jpg" alt=""></span>Chaim Levy <span class="ask-ai">AI</span></div><div class="ask-m a">' + it.h + '</div>';
+      return '<div class="ask-who"><span class="ask-av sm" aria-hidden="true"><img src="icons/chaim-levy.jpg" alt=""></span>Chaim Levy <span class="ask-ai">AI</span></div><div class="ask-m a">' + it.h +
+        (it.files && it.files.length ? '<p class="ask-dl">' + it.files.map(function (f) { return '<a class="btn" href="' + f.url + '" download="' + esc(f.name) + '">Download ' + esc(f.name) + '</a>'; }).join(' ') +
+          '<br><span class="note">Tracked changes and comments by Chaim Levy. Not saved to SharePoint: put it where it belongs yourself.</span></p>' : '') + '</div>';
     }).join('');
     if (!A.items.length) h = '<div class="ask-m a"><p>What would you like to know? A few things to try:</p><div class="ask-tries">' +
       ASK_TRIES.map(function (t) { return '<button type="button" class="chipbtn" data-act="asktry">' + esc(t) + '</button>'; }).join('') + '</div></div>';
@@ -1956,7 +2006,9 @@
   // (a reload or a cold start already begins empty, since the conversation is kept only in memory)
   function askReset() {
     if (!S.ask || S.ask.busy) return false;
-    S.ask.convo = []; S.ask.items = []; S.ask.draft = ''; S.ask.pending = null;
+    S.ask.convo = []; S.ask.items = []; S.ask.draft = ''; S.ask.pending = null; S.ask.files = [];
+    (S.ask.urls || []).forEach(function (u) { try { URL.revokeObjectURL(u); } catch (e) {} }); S.ask.urls = [];
+    ASKY_APP.reset(); askFilesRender();
     renderAsk(false);
     var aq = $('#askQ'); if (aq) aq.innerHTML = '';
     return true;
@@ -1980,7 +2032,10 @@
       '<button type="button" data-c="italic" title="Italic (Ctrl+I)" aria-label="Italic" aria-pressed="false"><i>I</i></button></div>' +
       '<div class="ask-ed" id="askQ" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Your question" dir="auto" spellcheck="true" ' +
       'data-ph="Ask a question, or paste a passage to check…"></div></div>' +
-      '<button class="btn" type="submit" id="askGo">Ask</button></form>' +
+      '<div class="ask-acts"><label class="ask-clip" title="Attach a Word file, PDF, spreadsheet or picture" aria-label="Attach a file"' + (C.askExtras ? '' : ' hidden') + '>' +
+      '<input type="file" id="askFile" multiple accept=".docx,.pdf,.xlsx,.txt,.md,.csv,image/*" hidden>' +
+      '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5l-8.6 8.6a5.5 5.5 0 0 1-7.8-7.8l8.6-8.6a3.7 3.7 0 0 1 5.2 5.2l-8.6 8.6a1.8 1.8 0 0 1-2.6-2.6l7.9-7.9"/></svg></label>' +
+      '<button class="btn" type="submit" id="askGo">Ask</button></div></form><div class="ask-files" id="askFiles"></div>' +
       '<div class="ask-foot"><p class="note">AI-generated answers on style, the texts, the corpus and the work itself. Bold and italics (the B and I buttons, Ctrl+B, Ctrl+I, or pasted from Word) are kept. Answers can be wrong; the rulebooks and the overseeing editor have the final word.</p>' +
       '<button type="button" class="btn ghost" data-act="asknew">New conversation</button></div>');
     renderAsk(false);
@@ -2032,18 +2087,43 @@
       }
     });
     $('#askForm').addEventListener('submit', function (e) { e.preventDefault(); askSubmit(); });
+    $('#askFile').addEventListener('change', function (e) {
+      var fs = Array.prototype.slice.call(e.target.files || []);
+      A.files = (A.files || []).concat(fs).slice(0, 4);
+      e.target.value = '';
+      askFilesRender();
+    });
+    askFilesRender();
+  }
+  /* files waiting to go with the next question */
+  function askFilesRender() {
+    var box = $('#askFiles'), A = S.ask;
+    if (!box || !A) return;
+    box.innerHTML = (A.files || []).map(function (f, i) {
+      return '<span class="ask-chip">' + esc(f.name) + ' <button type="button" data-act="askunfile" data-i="' + i + '" aria-label="Remove ' + esc(f.name) + '">×</button></span>';
+    }).join('');
   }
   async function askSubmit(text) {
     var A = S.ask, ta = $('#askQ'), q, uh;
     if (text != null) { q = String(text).trim(); uh = esc(q); }
     else { var runs = ta ? askRuns(ta, false) : []; q = askRunsMd(runs).trim(); uh = askRunsHtml(runs, false); }
+    var files = (A && A.files) || [];
+    if (!q && files.length) { q = 'Please look at the attached file.'; uh = esc(q); }
     if (!q || !A || A.busy) return;
-    A.busy = true; A.status = 'Thinking…'; A.draft = ''; A.pending = null;
+    A.busy = true; A.status = files.length ? 'Opening your files…' : 'Thinking…'; A.draft = ''; A.pending = null;
     A.items.forEach(function (it) { if (it.k === 'e') it.resume = false; });
     if (ta) { ta.innerHTML = ''; if (askSyncBtns) askSyncBtns(); }
-    A.items.push({ k: 'u', t: q, h: uh });
+    A.items.push({ k: 'u', t: q, h: uh + (files.length ? '<p class="ask-att">' + files.map(function (f) { return '📎 ' + esc(f.name); }).join('<br>') + '</p>' : '') });
+    A.files = []; askFilesRender();
     renderAsk(true);
-    await askWork(A.convo.concat([{ role: 'user', content: q }]), 0, q);
+    var content = q;
+    if (files.length) {
+      var got = [], bad = [];
+      for (var i = 0; i < files.length; i++) { try { got.push(await ASKY_APP.attach(files[i])); } catch (e) { bad.push(e.message || String(e)); } }
+      content = [{ type: 'text', text: q }].concat(ASKY_APP.attachBlocks(got));
+      if (bad.length) content.push({ type: 'text', text: '[Could not attach: ' + bad.join(' ') + ' Tell the editor.]' });
+    }
+    await askWork(A.convo.concat([{ role: 'user', content: content }]), 0, q);
   }
   async function askResume() {
     var A = S.ask, P = A && A.pending;
@@ -2057,13 +2137,15 @@
     var A = S.ask, round = round0;
     try {
       for (; round < ASK_MAX_ROUNDS + ASK_GRACE_ROUNDS; round++) {
+        ASKY_APP.trimTurn(turn, A.convo.length);
         var j = await askRelay(turn);
         var content = j.content || [];
         turn.push({ role: 'assistant', content: content });
         var uses = content.filter(function (b) { return b.type === 'tool_use'; });
         if (j.stop_reason !== 'tool_use' || !uses.length) {
           var answer = content.filter(function (b) { return b.type === 'text'; }).map(function (b) { return b.text; }).join('\n\n').trim();
-          A.items.push({ k: 'a', h: askMd(answer || 'I could not find an answer to that.') });
+          var made = ASKY_APP.takeMade().map(function (m) { var url = URL.createObjectURL(m.blob); (A.urls = A.urls || []).push(url); return { name: m.name, url: url }; });
+          A.items.push({ k: 'a', h: askMd(answer || 'I could not find an answer to that.'), files: made });
           A.convo = askSlim(turn);
           return;
         }
@@ -2859,6 +2941,7 @@
     if (act === 'pickfile') { $('#sFile').click(); return; }
     if (act === 'send') { doSend(); return; }
     if (act === 'askresume') { askResume(); return; }
+    if (act === 'askunfile') { var Af = S.ask; if (Af && Af.files) { Af.files.splice(parseInt(el.getAttribute('data-i'), 10), 1); askFilesRender(); } return; }
     if (act === 'asknew') { if (askReset()) { var aq = $('#askQ'); if (aq) aq.focus(); } return; }
     if (act === 'asktry') { var tq = el.textContent; if (/…$/.test(tq)) { var at = $('#askQ'); if (at) { at.textContent = tq.replace(/\s*…$/, ' '); S.ask.draft = at.innerHTML; at.focus(); var sl = window.getSelection(), rg = document.createRange(); rg.selectNodeContents(at); rg.collapse(false); sl.removeAllRanges(); sl.addRange(rg); } } else askSubmit(tq); return; }
     if (act === 'again') { S.submit = null; location.hash = '#/submit'; route(); return; }

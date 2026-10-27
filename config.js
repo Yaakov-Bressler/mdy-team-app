@@ -31,6 +31,10 @@ window.MDY_CONFIG = {
   ],
   /* Ask Claude: the team's relay to the Claude API. It holds the key and checks the person's Aleh Zayis sign-in. */
   askRelay: 'https://mdy-claude.yaakovbressler1.workers.dev/',
+  /* Ask Chaim Levy's second set of tools (ask-tools.js: live files, attachments, marked-up Word files, the team chat and
+     feedback sheets). The tools only run once the relay offers them; this switch shows the attach button. Turn it on
+     together with the relay update. */
+  askExtras: false,
   chatUrl: 'https://chat.google.com/room/AAQAnjn0HSU?cls=5',
   graphicsStages: ['Requests', 'Writer Requests', 'Prompts', 'Needs Approval', 'Ready for Review', 'Ready for Designer', 'Ready for Designing', 'Pending Charts', 'Ready to Go', 'Rejected'],
   /* The site's colour key, one colour per stage */
