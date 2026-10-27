@@ -1,7 +1,10 @@
 /* Ask Chaim Levy: the second set of tools (28 Oct 2026).
    find_files, read_file, read_attachment, make_word_file, search_discussions, plus attachments in the question box.
-   One module for the team app and the site's Ask Chaim Levy page: everything that touches SharePoint goes through
-   env.g (Microsoft Graph AS THE PERSON ASKING), so it can only open what that person can already open.
+   One module for the team app and the site's Ask Chaim Levy page. Everything that touches SharePoint goes through three
+   adapters each surface supplies, all running AS THE PERSON ASKING, so they can only open what that person already can:
+     env.stat(path)   -> { name, size, modified, eTag }      (path is relative to the documents library)
+     env.read(path)   -> ArrayBuffer
+     env.search(q)    -> [{ path, name, size, modified }]
 
    Cost guard (YB, 28 Oct 2026: no more than 8x the current API usage). Every relay round resends the whole turn, so
    anything big pulled in early is paid for again on every later round. So:
@@ -401,11 +404,6 @@ var ASKY = (function () {
   function create(env) {
     var S = { att: [], files: {}, made: [] };
     function libPath(p) { return String(p || '').replace(/^\/+/, '').replace(/^Shared Documents\//i, ''); }
-    async function libItem(path) {
-      var d = await env.driveId();
-      return env.g('/drives/' + d + '/root:/' + libPath(path).split('/').map(encodeURIComponent).join('/') + '?$select=id,name,size,lastModifiedDateTime,file,eTag,@microsoft.graph.downloadUrl');
-    }
-    async function libBuf(item) { return env.download(item); }
     async function openSource(src) {
       var m = String(src || '').match(/^\s*attachment\s*#?\s*(\d+)\s*$/i);
       if (m) {
@@ -414,16 +412,17 @@ var ASKY = (function () {
         return a;
       }
       var key = libPath(src);
-      var item = await libItem(key);
+      var item;
+      try { item = await env.stat(key); } catch (e) { throw new Error('No file at ' + key + ' that you can open. find_files gives the exact path.'); }
       var hit = S.files[key];
       if (hit && hit.eTag === item.eTag) return hit;
       if (item.size > MAX_ATTACH_BYTES) throw new Error('That file is too large to open here (' + Math.round(item.size / 1048576) + ' MB).');
-      var name = item.name, buf = await libBuf(item), out;
+      var name = item.name, buf = await env.read(key), out;
       if (/\.docx$/i.test(name)) { out = await loadDocx(env, buf); out.lines = docxLines(out); }
       else if (/\.(md|txt|csv|json)$/i.test(name)) { var t = env.decode(buf); out = { kind: 'text', lines: t.split(/\n/) }; }
       else if (/\.xlsx$/i.test(name)) { var rows = await xlsxRows(env, buf); out = { kind: 'xlsx', lines: rows.map(function (r) { return 'row ' + r.n + ': ' + r.cells.map(function (c) { return c == null ? '' : String(c).replace(/\s+/g, ' '); }).join(' | '); }) }; }
       else throw new Error('I can read Word, Excel and text files from the library, not ' + (name.split('.').pop() || 'this kind of file') + ' files.');
-      out.name = name; out.path = key; out.eTag = item.eTag; out.buf = buf; out.modified = item.lastModifiedDateTime;
+      out.name = name; out.path = key; out.eTag = item.eTag; out.buf = buf; out.modified = item.modified;
       S.files[key] = out;
       return out;
     }
@@ -454,17 +453,14 @@ var ASKY = (function () {
     async function find_files(input) {
       var q = String(input.query || '').trim();
       if (!q) return { error: 'empty query' };
-      var d = await env.driveId();
-      var res = await env.g('/drives/' + d + "/root/search(q='" + encodeURIComponent(q.replace(/'/g, "''")) + "')?$select=name,size,lastModifiedDateTime,parentReference,file&$top=60");
-      var items = (res && res.value || []).filter(function (x) { return x.file && /\.(docx|xlsx|md|txt)$/i.test(x.name); });
-      if (input.folder) { var f = norm(input.folder); items = items.filter(function (x) { return norm((x.parentReference && x.parentReference.path) || '').indexOf(f) >= 0; }); }
-      items = items.filter(function (x) { return !/\/(Archive|_Archive|\.graphics-backups|skill-backups)\b/i.test((x.parentReference && x.parentReference.path) || ''); });
-      items.sort(function (a, b) { return String(b.lastModifiedDateTime).localeCompare(String(a.lastModifiedDateTime)); });
+      var items = (await env.search(q)).filter(function (x) { return /\.(docx|xlsx|md|txt)$/i.test(x.name); });
+      if (input.folder) { var f = norm(input.folder); items = items.filter(function (x) { return norm(x.path).indexOf(f) >= 0; }); }
+      items = items.filter(function (x) { return !/(^|\/)(Archive|_Archive|\.graphics-backups|skill-backups)(\/|$)/i.test(x.path); });
+      items.sort(function (a, b) { return String(b.modified).localeCompare(String(a.modified)); });
       return {
         found: items.length,
         files: items.slice(0, num(input.limit, 1, 20, 12)).map(function (x) {
-          var par = ((x.parentReference && x.parentReference.path) || '').replace(/^\/drives\/[^/]+\/root:\/?/, '');
-          return { path: decodeURIComponent(par ? par + '/' + x.name : x.name), saved: String(x.lastModifiedDateTime || '').slice(0, 16).replace('T', ' '), size_kb: Math.round((x.size || 0) / 1024) };
+          return { path: x.path, saved: String(x.modified || '').slice(0, 16).replace('T', ' '), size_kb: Math.round((x.size || 0) / 1024) };
         }),
         note: 'Newest first. Open one with read_file and its path.'
       };

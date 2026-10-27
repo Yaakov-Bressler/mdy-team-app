@@ -1766,11 +1766,22 @@
     });
   }
   var ASKY_APP = ASKY.create({
-    g: g, driveId: driveId, JSZip: window.JSZip, DOMParser: window.DOMParser, XMLSerializer: window.XMLSerializer,
-    download: async function (item) {
-      if (TEST && TEST.download) return TEST.download(item);
-      var url = item['@microsoft.graph.downloadUrl'] || (await g('/drives/' + (await driveId()) + '/items/' + item.id))['@microsoft.graph.downloadUrl'];
-      return (await fetch(url)).arrayBuffer();
+    JSZip: window.JSZip, DOMParser: window.DOMParser, XMLSerializer: window.XMLSerializer,
+    stat: async function (path) {
+      var it = await g('/drives/' + (await driveId()) + '/root:/' + path.split('/').map(encodeURIComponent).join('/') + '?$select=id,name,size,lastModifiedDateTime,eTag');
+      return { name: it.name, size: it.size, modified: it.lastModifiedDateTime, eTag: it.eTag, id: it.id, __f: it.__f };
+    },
+    read: async function (path) {
+      var it = await g('/drives/' + (await driveId()) + '/root:/' + path.split('/').map(encodeURIComponent).join('/'));
+      if (TEST && TEST.download) return TEST.download(it);
+      return (await fetch(it['@microsoft.graph.downloadUrl'])).arrayBuffer();
+    },
+    search: async function (q) {
+      var res = await g('/drives/' + (await driveId()) + "/root/search(q='" + encodeURIComponent(q.replace(/'/g, "''")) + "')?$select=name,size,lastModifiedDateTime,parentReference,file&$top=60");
+      return (res && res.value || []).filter(function (x) { return x.file; }).map(function (x) {
+        var par = decodeURIComponent(((x.parentReference && x.parentReference.path) || '').replace(/^\/drives\/[^/]+\/root:\/?/, ''));
+        return { name: x.name, path: par ? par + '/' + x.name : x.name, size: x.size, modified: x.lastModifiedDateTime };
+      });
     },
     json: function (name) { return askData(name); },
     decode: function (buf) { return new TextDecoder('utf-8').decode(buf); },
