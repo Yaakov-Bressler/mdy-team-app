@@ -37,9 +37,11 @@
   }
   function stageColor(s) { return C.stageColors[s] || '#8a8f98'; }
   /* the stages a masechta (or a set of masechtos) runs on: its own list from C.workflows, else every choice on the tracker */
-  function stagesFor(ms) {
+  function stagesFor(ms, rowWf) {
     var list = [].concat(ms || []);
-    var wf = (C.workflows || []).filter(function (w) { return list.length && list.every(function (m) { return w.masechtos.indexOf(m) > -1; }); })[0];
+    var hits = (C.workflows || []).filter(function (w) { return list.length && list.every(function (m) { return w.masechtos.indexOf(m) > -1; }); });
+    /* a row's own Workflow (New/Old) picks its entry; otherwise the entry with no workflow */
+    var wf = (rowWf ? hits.filter(function (w) { return w.workflow === rowWf; })[0] : null) || hits.filter(function (w) { return !w.workflow; })[0];
     return wf ? wf.stages : (S.stages || Object.keys(C.stageColors));
   }
   function stageChip(s, label) {
@@ -393,9 +395,10 @@
     if (r.workflow) bits.push(r.workflow + ' workflow');
     return bits.join(' · ');
   }
-  function nextStage(s, m) {
-    var list = stagesFor(m);
+  function nextStage(s, m, rowWf) {
+    var list = stagesFor(m, rowWf);
     var i = list.indexOf(s);
+    if (i < 0 && C.retiredNext && list.indexOf(C.retiredNext[s]) > -1) return C.retiredNext[s];
     return i > -1 && i < list.length - 1 ? list[i + 1] : s;
   }
   async function moveStage(row, stage) {
@@ -2322,7 +2325,7 @@
   }
 
   function openMoveSheet(row) {
-    var list = stagesFor(row.masechta);
+    var list = stagesFor(row.masechta, row.workflow);
     var w = $('#sheet');
     w.innerHTML = '<div class="sheet" role="dialog" aria-modal="true" aria-label="Move ' + esc(row.title) + '">' +
       '<h2>Move ' + esc(row.title) + '</h2><p class="note">Now at ' + esc(row.stage) + '. Pick its new stage.</p>' +
@@ -2363,7 +2366,7 @@
     if (!s || (rowId && s.rowId !== rowId) || s.sent) {
       var mine = rows.filter(isMine);
       var row0 = rows.filter(function (r) { return r.id === rowId; })[0] || mine[0] || null;
-      s = S.submit = { rowId: row0 ? row0.id : null, showAll: !!(row0 && !isMine(row0)), stage: row0 ? nextStage(row0.stage, row0.masechta) : '', file: null, name: '', nameTouched: false, role: 'Editors', person: null, note: '', sent: false, busy: false };
+      s = S.submit = { rowId: row0 ? row0.id : null, showAll: !!(row0 && !isMine(row0)), stage: row0 ? nextStage(row0.stage, row0.masechta, row0.workflow) : '', file: null, name: '', nameTouched: false, role: 'Editors', person: null, note: '', sent: false, busy: false };
     }
     await renderSubmit();
   }
@@ -2414,7 +2417,7 @@
       } catch (e) { folderHtml = errBox(e); }
     }
     if (row && !s.nameTouched) s.name = suggestName(row, s.file);
-    var stages = row ? stagesFor(row.masechta) : (S.stages || []);
+    var stages = row ? stagesFor(row.masechta, row.workflow) : (S.stages || []);
     var ready = row && s.file && s.name && s.parentId && !s.busy;
     var h = '<section class="field"><label class="lbl" for="sAmud">1. Which amud?</label><select id="sAmud" data-act="samud">' + opts + '</select>' +
       '<label style="display:flex;gap:8px;align-items:center;font-size:14.5px;min-height:36px"><input type="checkbox" data-act="sall"' + (s.showAll ? ' checked' : '') + ' style="width:20px;height:20px"> Show every amud, not just mine</label></section>';
@@ -2962,7 +2965,7 @@
     if (el.id === 'sFile' && s) { s.file = el.files && el.files[0] || null; s.nameTouched = false; renderSubmit(); return; }
     var act = el.getAttribute && el.getAttribute('data-act');
     if (!s || !act) return;
-    if (act === 'samud') { s.rowId = el.value || null; var r = (S.tracker || []).filter(function (x) { return x.id === s.rowId; })[0]; s.stage = r ? nextStage(r.stage, r.masechta) : ''; s.nameTouched = false; s.person = null; renderSubmit(); }
+    if (act === 'samud') { s.rowId = el.value || null; var r = (S.tracker || []).filter(function (x) { return x.id === s.rowId; })[0]; s.stage = r ? nextStage(r.stage, r.masechta, r.workflow) : ''; s.nameTouched = false; s.person = null; renderSubmit(); }
     else if (act === 'sall') { s.showAll = el.checked; renderSubmit(); }
     else if (act === 'sstage') { s.stage = el.value; renderSubmit(); }
     else if (act === 'srole') { s.role = el.value; s.person = null; renderSubmit(); }
