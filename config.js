@@ -25,21 +25,17 @@ window.MDY_CONFIG = {
   ],
   /* Masechtos that run on their own, shorter list of stages instead of every choice on the tracker's Stage column.
      The Meilah volume has eight (YB, 26 Oct 2026).
-     Kerisos (YB, 28 Oct 2026): no Run, no Edited 2 before Kramer, no Post Kramer, Mevukar 2, Edited 3 or Review 2; after Kramer
-     it is Edited 2, Proofread, Final on both its workflows, and Closed is now Final. An entry with 'workflow' is for rows whose
-     Workflow column says so (the move sheet, Submit, Next stage); the entry without one is for the masechta bars. */
+     Kerisos (YB, 28 Oct 2026) runs on one list, New and Old rows alike: no Run, no Edited 2 before Kramer, no Post Kramer,
+     Mevukar 2, Edited 3 or Review 2; after Kramer it is Edited 2, Proofread, Final, and Closed is now Final.
+     An entry may also carry workflow: 'New'/'Old' to apply only to rows whose Workflow column says so (none does today). */
   workflows: [
     { name: 'Meilah volume', masechtos: ['Meilah', 'Kinnim', 'Tamid', 'Middos'],
       stages: ['Open', 'Generated', 'Edited', 'Mevukar', 'Kramer', 'Edited 2', 'Proofread', 'Final'] },
-    { name: 'Kerisos new', masechtos: ['Kerisos'], workflow: 'New',
-      stages: ['Open', 'Generated', 'Edited', 'Reviewed', 'Mevukar', 'Kramer', 'Edited 2', 'Proofread', 'Final'] },
-    { name: 'Kerisos old', masechtos: ['Kerisos'], workflow: 'Old',
-      stages: ['Open', 'Written', 'Edited', 'Mevukar', 'Kramer', 'Edited 2', 'Proofread', 'Final'] },
     { name: 'Kerisos', masechtos: ['Kerisos'],
-      stages: ['Open', 'Generated', 'Written', 'Edited', 'Reviewed', 'Mevukar', 'Kramer', 'Edited 2', 'Proofread', 'Final'] }
+      stages: ['Open', 'Generated', 'Edited', 'Reviewed', 'Mevukar', 'Kramer', 'Edited 2', 'Proofread', 'Final'] }
   ],
   /* A row still on a stage that has been taken off its workflow moves on to this one with Next / Submit (28 Oct 2026). */
-  retiredNext: { 'Run': 'Edited', 'Post Kramer': 'Edited 2', 'Edited 3': 'Proofread', 'Review 2': 'Proofread', 'Mevukar 2': 'Proofread', 'Check': 'Final', 'Closed': 'Final' },
+  retiredNext: { 'Written': 'Edited', 'Run': 'Edited', 'Post Kramer': 'Edited 2', 'Edited 3': 'Proofread', 'Review 2': 'Proofread', 'Mevukar 2': 'Proofread', 'Check': 'Final', 'Closed': 'Final' },
   /* Ask Claude: the team's relay to the Claude API. It holds the key and checks the person's Aleh Zayis sign-in. */
   askRelay: 'https://mdy-claude.yaakovbressler1.workers.dev/',
   /* Ask Chaim Levy's second set of tools (ask-tools.js: live files, attachments, marked-up Word files, the team chat and
