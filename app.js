@@ -662,7 +662,8 @@
     return S.lines[m];
   }
   /* English only: grouped by wording; the exact wording first, then one starting with the query, then the query at a word start, then anywhere; most used first inside each */
-  function lineSearch(sets, q, whole) {
+  function lineSearch(sets, q, whole, opts) {
+    if (opts && opts.wide) { var r0 = lineSearch(sets, q, whole), have = {}; r0.groups.forEach(function (g) { have[g.key] = 1; }); r0.wide = textWide(sets, q, have); return r0; }
     var nq = enNorm(q || '');
     if (hasHe(q) || nq.length < 2) return { groups: [], total: 0 };
     var nk = enKey(q), map = {}, list = [], total = 0;
@@ -709,8 +710,88 @@
     if (!rich) return hl(text, words || []);
     return rich.map(function (seg) { var t = hl(seg[0], words || []); return seg[1] ? '<em>' + t + '</em>' : t; }).join('');
   }
+
+  /* ---------- widened search (29 Oct 2026): the same engine as the site's Guide (widen.js, MDYWiden) ----------
+     Run after the exact search; it lists only what the exact search did not find, as other forms. "Exact only" turns it off. */
+  var WVOC = typeof WeakMap !== 'undefined' ? new WeakMap() : null;
+  function wideVocab(sets, item) {
+    var key = sets[0] || sets, v = WVOC && sets.length === 1 && WVOC.get(key);
+    if (v) return v;
+    var all = [];
+    sets.forEach(function (rows) { rows.forEach(function (r) { all.push(item(r)); }); });
+    v = MDYWiden.vocab(all);
+    if (WVOC && sets.length === 1) WVOC.set(key, v);
+    return v;
+  }
+  function wideWord(w) { return String(w || '').replace(/[֑-ׇ]/g, '').replace(/^[^א-תA-Za-z0-9]+|[^א-תA-Za-z0-9'’]+$/g, ''); }
+  function wideShort(q) { return hasHe(q) ? MDYWiden.hebTokens(q).join('').length < 2 : q.trim().length < 3; }
+  /* corpus rows the exact phrase search missed, grouped by rendering: { groups, total, words } */
+  function phraseWide(sets, q, res) {
+    var out = { groups: [], total: 0, words: {} }, heb = hasHe(q), Q = heb ? MDYWiden.hebQuery(q) : MDYWiden.engQuery(q);
+    if (!Q || wideShort(q)) return out;
+    var seen = {};
+    (res ? res.groups : []).forEach(function (gr) { gr.hits.forEach(function (h) { seen[h.m + '|' + h.i] = 1; }); });
+    var vb = heb ? null : wideVocab(sets, function (r) { return [r.eng, r.rich]; });
+    var map = {};
+    sets.forEach(function (rows) {
+      rows.forEach(function (r, i) {
+        if (seen[r.m + '|' + i]) return;
+        var f;
+        if (heb) { if (!r.wht) { r.whs = r.heb.split(/\s+/); r.wht = r.whs.map(MDYWiden.hebWord); } f = MDYWiden.hebFind(r.wht, Q); }
+        else f = MDYWiden.engFind(r.eng, Q, vb, r.wt || (r.wt = MDYWiden.engTokens(r.eng)));
+        if (!f) return;
+        out.total++;
+        var vw = heb ? f.vi.map(function (k) { return wideWord(r.whs[k]); }) : f.vw;
+        vw.forEach(function (w) { if (w) out.words[w] = (out.words[w] || 0) + 1; });
+        var key = enKey(r.eng), gr = map[key];
+        if (!gr) { gr = map[key] = { key: key, eng: r.eng, rich: r.rich, heb: r.heb, hits: [], vw: {} }; out.groups.push(gr); }
+        gr.hits.push({ m: r.m, i: i, span: 1, daf: r.daf, part: r.part });
+        vw.forEach(function (w) { gr.vw[w] = 1; });
+      });
+    });
+    out.groups.forEach(function (g) { g.vw = Object.keys(g.vw); });
+    out.groups.sort(function (a, b) { return b.hits.length - a.hits.length; });
+    return out;
+  }
+  /* headers or English-only lines the exact search missed, grouped by wording */
+  function textWide(sets, q, have) {
+    var out = { groups: [], total: 0, words: {} }, Q = !hasHe(q) && MDYWiden.engQuery(q || '');
+    if (!Q || wideShort(q)) return out;
+    var vb = wideVocab(sets, function (h) { return [h.text, h.rich]; }), map = {};
+    sets.forEach(function (rows) {
+      rows.forEach(function (h) {
+        var key = enKey(h.text);
+        if (!key || have[key]) return;
+        var f = MDYWiden.engFind(h.text, Q, vb, h.wt || (h.wt = MDYWiden.engTokens(h.text)));
+        if (!f) return;
+        out.total++;
+        f.vw.forEach(function (w) { out.words[w] = (out.words[w] || 0) + 1; });
+        var gr = map[key];
+        if (!gr) { gr = map[key] = { key: key, text: h.text, rich: h.rich, items: [], kinds: { o: 0, m: 0, s: 0, t: 0 }, vw: {} }; out.groups.push(gr); }
+        gr.items.push(h); if (gr.kinds[h.kind] != null) gr.kinds[h.kind]++;
+        f.vw.forEach(function (w) { gr.vw[w] = 1; });
+      });
+    });
+    out.groups.forEach(function (g) { g.vw = Object.keys(g.vw); });
+    out.groups.sort(function (a, b) { return b.items.length - a.items.length; });
+    return out;
+  }
+  function wideAlso(words) {
+    var list = Object.keys(words || {}).sort(function (a, b) { return words[b] - words[a]; });
+    if (!list.length) return '';
+    return '<div class="also">Also matching ' + list.slice(0, 12).map(function (w) { return '<span' + (hasHe(w) ? ' class="he" lang="he"' : '') + '>' + esc(w) + ' <i>×' + words[w] + '</i></span>'; }).join('') +
+      (list.length > 12 ? '<span>+' + (list.length - 12) + ' more</span>' : '') + '</div>';
+  }
+  var VTAG = '<span class="tag v" title="Found by the widened search: another form of what you typed">other form</span>';
+  var WIDE_KEYS = { Spelling: 1, Phrases: 1, Headers: 1, Definitions: 1 };
+  var WIDE_SUB = 'Also finds other forms: says, said · korban, korbanos · shemitah, shemittah · <bdi lang="he" dir="rtl">מצוה, מצות</bdi>';
+  function exactPref(v) {
+    try { if (v == null) return localStorage.getItem('mdyGuideExact') === '1'; localStorage.setItem('mdyGuideExact', v ? '1' : '0'); } catch (e) {}
+    return !!v;
+  }
   /* whole: whole words only (Ask Claude), rather than completing the last word as it is typed */
-  function phraseSearch(sets, q, whole) {
+  function phraseSearch(sets, q, whole, opts) {
+    if (opts && opts.wide) { var r0 = phraseSearch(sets, q, whole) || { groups: [], total: 0 }; r0.wide = phraseWide(sets, q, r0); return r0; }
     var groups = {}, list = [], total = 0, CAP = 6000;
     function add(rows, i, span, exact) {
       if (total >= CAP) return;
@@ -775,7 +856,8 @@
     list.sort(function (a, b) { return (b.exact - a.exact) || (b.hits.length - a.hits.length); });
     return { groups: list, total: total, capped: total >= CAP };
   }
-  function headerSearch(sets, q) {
+  function headerSearch(sets, q, opts) {
+    if (opts && opts.wide && enKey(q || '')) { var r0 = headerSearch(sets, q), have = {}; r0.forEach(function (g) { have[g.key] = 1; }); r0.wide = textWide(sets, q, have); return r0; }
     var map = {}, list = [];
     sets.forEach(function (rows) {
       rows.forEach(function (h) {
@@ -853,7 +935,24 @@
     return t;
   }
   var SKIP_HEADS = /^(search words|notes to claude|open questions from claude|recent changes|start here)/i;
-  function searchDoc(doc, q, mode) {
+  function searchDoc(doc, q, mode, opts) {
+    if (opts && opts.wide && WIDE_KEYS[mode.key] && !wideShort(q)) {
+      var r0 = searchDoc(doc, q, mode), have = new Set(r0.map(function (x) { return x.e; })), heb = hasHe(q);
+      var Q = heb ? MDYWiden.hebQuery(q) : MDYWiden.engQuery(q), more = [];
+      if (Q) doc.entries.forEach(function (e, n) {
+        if (have.has(e) || e.kind === 'h') return;
+        if (mode.table && !(e.cells && e.cells.length > 1) && e.kind !== 'row') return;
+        var parts = e.cells && e.cells.length ? e.cells : [e.text], at = -1;
+        parts.some(function (c, k) {
+          var f = heb ? MDYWiden.hebFind(MDYWiden.hebTokens(c), Q) : MDYWiden.engFind(c, Q, MDYWiden.ALL_TRANSLIT);
+          if (f) at = k * 1000 + f.at;
+          return !!f;
+        });
+        if (at >= 0) more.push({ e: e, score: 9, v: true, s: at, n: n });
+      });
+      more.sort(function (a, b) { return a.s - b.s || a.n - b.n; });
+      return r0.concat(more.slice(0, 20));
+    }
     var nq = norm(q).trim();
     if (!nq) return [];
     var words = nq.split(/\s+/).filter(Boolean);
@@ -2475,6 +2574,7 @@
       return '<button class="chipbtn" data-act="gmode" data-k="' + x.key + '" aria-pressed="' + (x.key === mode.key) + '">' + x.key + '</button>';
     }).join('') + '<a class="chipbtn chip-ask" href="#/ask">' + ICON.ask + 'Ask Chaim Levy</a></div><label class="sr" for="gq">' + esc(mode.ph) + '</label>' +
       '<input id="gq" type="search" dir="auto" placeholder="' + esc(mode.ph) + '" value="' + esc(S.guideQ) + '" autocomplete="off" style="margin-top:10px">' +
+      (WIDE_KEYS[mode.key] ? '<div class="wopt"><button class="chipbtn" data-act="gexact" aria-pressed="' + exactPref() + '">Exact only</button><span class="wsub">' + (exactPref() ? 'Only the wording as typed.' : WIDE_SUB) + '</span></div>' : '') +
       '<div id="gfilter"></div>';
     frame({ title: 'Guide', tab: 'guide', kicker: 'Style and look-ups', sub: sub });
     var inp = $('#gq');
@@ -2520,14 +2620,17 @@
         setView('<div class="card empty">Type a Hebrew phrase, or English words, to see how it was rendered in the delivered amudim. English with no Hebrew before it (a heading, the words that open a paragraph) is searched too.</div><p class="note">' + phrases.toLocaleString() + ' phrases' + (nlines ? ' and ' + nlines.toLocaleString() + ' English-only lines' : '') + ' from ' + esc(names.join(', ')) + '. The same index as the site’s Guide page.</p>');
         return;
       }
-      var res = phraseSearch(sets, q) || { groups: [], total: 0 };
-      var lr = lineSearch(lsets, q);
-      if (!res.groups.length && !lr.groups.length) { setView('<div class="card empty">Nothing found for “' + esc(q) + '”.</div>'); return; }
+      var wopt = exactPref() ? null : { wide: true };
+      var res = phraseSearch(sets, q, false, wopt) || { groups: [], total: 0 };
+      var lr = lineSearch(lsets, q, false, wopt);
+      var wr = res.wide || { groups: [], total: 0, words: {} }, wl = lr.wide || { groups: [], total: 0, words: {} };
+      if (!res.groups.length && !lr.groups.length && !wr.groups.length && !wl.groups.length) { setView('<div class="card empty">Nothing found for “' + esc(q) + '”.</div>'); return; }
       var words = hasHe(q) ? [] : [enNorm(q)];
       var ex = res.groups.filter(function (g) { return g.exact; });
       var rest = res.groups.filter(function (g) { return !g.exact; });
       h += '<p class="note">' + (res.groups.length ? res.total.toLocaleString() + (res.capped ? '+' : '') + ' places in ' + res.groups.length.toLocaleString() + ' renderings' : 'No Hebrew–English phrase') +
-        (lr.total ? ', and ' + lr.total.toLocaleString() + ' line' + (lr.total === 1 ? '' : 's') + ' with no Hebrew before ' + (lr.total === 1 ? 'it' : 'them') : '') + '.</p>';
+        (lr.total ? ', and ' + lr.total.toLocaleString() + ' line' + (lr.total === 1 ? '' : 's') + ' with no Hebrew before ' + (lr.total === 1 ? 'it' : 'them') : '') +
+        (wr.total + wl.total ? '; ' + (wr.total + wl.total).toLocaleString() + ' more in other forms' : '') + '.</p>';
       if (lr.groups.length) {
         var ll = S.llimit || 6, lmax = lr.groups.reduce(function (a, g) { return Math.max(a, g.items.length); }, 1);
         h += '<h2 class="sec">Lines with no Hebrew before them <small>' + lr.total.toLocaleString() + '</small></h2><div class="card pad0 hits">' + lr.groups.slice(0, ll).map(function (gr) {
@@ -2551,14 +2654,28 @@
       if (ex.length) h += '<h2 class="sec">Renderings of exactly this phrase</h2><div class="card pad0 hits">' + ex.slice(0, limit).map(card).join('') + '</div>';
       if (rest.length) h += (ex.length ? '<h2 class="sec">Inside longer phrases</h2>' : '') + '<div class="card pad0 hits">' + rest.slice(0, limit).map(card).join('') + '</div>';
       if (ex.length > limit || rest.length > limit) h += '<button class="btn ghost block" data-act="morelimit">Show more</button>';
+      if (wr.groups.length || wl.groups.length) {
+        var vcard = function (gr) {
+          return '<div class="hit"><div class="txt" style="color:var(--ink);font-size:16px">' + richHtml(gr.rich, gr.eng, hasHe(q) ? [] : gr.vw) + VTAG + '</div>' +
+            '<div class="he" lang="he" dir="rtl" style="font-size:16px;color:var(--ink-2)">' + (hasHe(q) ? hl(gr.heb, gr.vw) : esc(gr.heb)) + '</div>' +
+            '<div class="note">' + gr.hits.length + '×</div>' + citeChips(gr.hits, 'ctx', 'v:' + gr.key) + '</div>';
+        };
+        h += '<h2 class="sec">Other forms <small>' + (wr.total + wl.total).toLocaleString() + '</small></h2>' + wideAlso(Object.keys(wl.words).reduce(function (o, k) { o[k] = (o[k] || 0) + wl.words[k]; return o; }, Object.assign({}, wr.words)));
+        if (wl.groups.length) h += '<div class="card pad0 hits">' + wl.groups.slice(0, 6).map(function (gr) {
+          var sn = lineSnip(gr.text, gr.vw[0] || q);
+          return '<div class="hit"><div class="txt" style="color:var(--ink);font-size:16px">' + (sn.cut ? hl(sn.text, gr.vw) : richHtml(gr.rich, gr.text, gr.vw)) + VTAG + '</div><div class="note">' + gr.items.length + '× · line with no Hebrew before it</div>' + citeChips(gr.items, 'lctx', 'vl:' + gr.key) + '</div>';
+        }).join('') + '</div>';
+        if (wr.groups.length) h += '<div class="card pad0 hits">' + wr.groups.slice(0, limit).map(vcard).join('') + '</div>';
+        if (wr.groups.length > limit) h += '<button class="btn ghost block" data-act="morelimit">Show more</button>';
+      }
       setView(h);
       return;
     }
     // headers
     if (hasHe(q)) { setView('<div class="card empty">Headers are in English. Type English words.</div>'); return; }
     var hsets = names.map(function (n) { return (S.hdr || {})[n] || []; });
-    var groups = headerSearch(hsets, q);
-    if (!groups.length) { setView('<div class="card empty">No header like “' + esc(q) + '”.</div>'); return; }
+    var groups = headerSearch(hsets, q, exactPref() ? null : { wide: true }), wh = groups.wide || { groups: [], total: 0, words: {} };
+    if (!groups.length && !wh.groups.length) { setView('<div class="card empty">No header like “' + esc(q) + '”.</div>'); return; }
     var max = groups.reduce(function (a, g) { return Math.max(a, g.items.length); }, 1);
     var nwords = q ? enNorm(q).split(' ') : [];
     h += '<p class="note">' + (q ? groups.length.toLocaleString() + ' wordings match.' : 'All headers, most used first.') + '</p><div class="card pad0 hits">' + groups.slice(0, limit).map(function (gr) {
@@ -2571,6 +2688,18 @@
         '<div class="note">' + esc(kinds.join(' · ')) + '</div>' + citeChips(gr.items, 'hctx', 'h:' + gr.key) + '</div>';
     }).join('') + '</div>';
     if (groups.length > limit) h += '<button class="btn ghost block" data-act="morelimit">Show more</button>';
+    if (wh.groups.length) {
+      var vmax = wh.groups.reduce(function (a, g) { return Math.max(a, g.items.length); }, 1);
+      h += '<h2 class="sec">Other forms <small>' + wh.total.toLocaleString() + '</small></h2>' + wideAlso(wh.words) + '<div class="card pad0 hits">' + wh.groups.slice(0, limit).map(function (gr) {
+        var kinds = [];
+        if (gr.kinds.o) kinds.push('opens a paragraph ' + gr.kinds.o);
+        if (gr.kinds.m) kinds.push('mid-paragraph ' + gr.kinds.m);
+        if (gr.kinds.s) kinds.push('own line ' + gr.kinds.s);
+        return '<div class="hit"><div class="txt" style="color:var(--ink);font-size:16px;font-weight:600">' + richHtml(gr.rich, gr.text, gr.vw) + VTAG + '</div>' +
+          '<div style="display:flex;align-items:center;gap:8px"><div class="bar" style="flex:1;height:8px"><i style="width:' + Math.max(3, Math.round(gr.items.length / vmax * 100)) + '%;background:var(--gold)"></i></div><span class="note">' + gr.items.length + '×</span></div>' +
+          '<div class="note">' + esc(kinds.join(' · ')) + '</div>' + citeChips(gr.items, 'hctx', 'vh:' + gr.key) + '</div>';
+      }).join('') + '</div>';
+    }
     setView(h);
   }
   async function amudLink(m, daf) {
@@ -2628,15 +2757,18 @@
       setView(intro + foot);
       return;
     }
-    var hits = searchDoc(doc, q, mode);
+    var hits = searchDoc(doc, q, mode, exactPref() ? null : { wide: true });
     var words = norm(q).split(/\s+/).filter(Boolean);
-    var h = '<div class="card pad0 hits">' + (hits.length ? hits.map(function (x) {
-      var e = x.e;
+    var item = function (x) {
+      var e = x.e, tag = x.v ? VTAG : '';
       if (mode.table && e.cells) {
-        return '<div class="hit"><div class="cells">' + e.cells.map(function (c) { return '<span class="c' + (hasHe(c) ? ' he" lang="he' : '') + '">' + hl(c, words) + '</span>'; }).join('') + '</div></div>';
+        return '<div class="hit"><div class="cells">' + e.cells.map(function (c, k) { return '<span class="c' + (hasHe(c) ? ' he" lang="he' : '') + '">' + hl(c, words) + (k === e.cells.length - 1 ? tag : '') + '</span>'; }).join('') + '</div></div>';
       }
-      return '<div class="hit">' + (e.heading ? '<span class="ctx">' + esc(e.heading) + '</span>' : '') + '<span class="txt"' + (hasHe(e.text) && !/[a-z]/i.test(e.text) ? ' dir="rtl" lang="he"' : '') + '>' + hl(e.text, words) + '</span></div>';
-    }).join('') : '<div class="empty">Nothing found for “' + esc(q) + '”.</div>') + '</div>';
+      return '<div class="hit">' + (e.heading ? '<span class="ctx">' + esc(e.heading) + '</span>' : '') + '<span class="txt"' + (hasHe(e.text) && !/[a-z]/i.test(e.text) ? ' dir="rtl" lang="he"' : '') + '>' + hl(e.text, words) + tag + '</span></div>';
+    };
+    var exactHits = hits.filter(function (x) { return !x.v; }), otherHits = hits.filter(function (x) { return x.v; });
+    var h = '<div class="card pad0 hits">' + (exactHits.length ? exactHits.map(item).join('') : '<div class="empty">' + (otherHits.length ? 'No exact match for “' + esc(q) + '”; other forms below.' : 'Nothing found for “' + esc(q) + '”.') + '</div>') + '</div>' +
+      (otherHits.length ? '<h2 class="sec">Other forms <small>' + otherHits.length + '</small></h2><div class="card pad0 hits">' + otherHits.map(item).join('') + '</div>' : '');
     setView(h + foot);
   }
 
@@ -2939,6 +3071,14 @@
     if (act === 'tm') { location.hash = '#/tracker/' + encodeURIComponent(el.getAttribute('data-m')); return; }
     if (act === 'gm') { S.graphicsM = el.getAttribute('data-m'); route(); return; }
     if (act === 'dfilter') { S.deadlineFilter = el.getAttribute('data-k'); route(); return; }
+    if (act === 'gexact') {
+      var ex = exactPref(!exactPref());
+      el.setAttribute('aria-pressed', String(ex));
+      if (el.nextSibling) el.nextSibling.innerHTML = ex ? 'Only the wording as typed.' : WIDE_SUB;
+      S.expanded = {}; S.limit = 25; S.llimit = 6;
+      if (guideMode().kind === 'doc') renderGuideResults(); else renderIndexResults();
+      return;
+    }
     if (act === 'gmode') { S.guideMode = el.getAttribute('data-k'); S.expanded = {}; S.limit = 25; route(); return; }
     if (act === 'cfilter') { S.cFilter = el.getAttribute('data-m'); S.expanded = {}; S.llimit = 6; route(); return; }
     if (act === 'expand') { S.expanded = S.expanded || {}; S.expanded[el.getAttribute('data-k')] = true; renderIndexResults(); return; }
