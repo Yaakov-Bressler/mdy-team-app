@@ -98,6 +98,15 @@ h2.sec small { font-family: var(--sans); font-size: 13.5px; font-weight: 400; co
 .dl .dt b { font-size: 16.5px; }
 .dl .dt span { font-size: 14px; color: var(--ink-2); }
 .tag { align-self: flex-start; padding: 1px 8px; border-radius: 6px; background: #efece5; font-size: 12px; font-weight: 700; color: var(--ink-2); }
+/* widened search (29 Oct 2026) */
+.wopt { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
+.wopt .chipbtn { min-height: 32px; font-size: 13px; }
+.wopt .wsub { font-size: 12.5px; color: #c9d1dc; line-height: 1.35; flex: 1 1 200px; }
+.tag.v { background: #e3f1e6; color: #2f6b3f; font-weight: 700; margin-left: 6px; vertical-align: 2px; white-space: nowrap; }
+.also { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 13px; color: var(--ink-2); margin: 0 0 8px; }
+.also span { background: #efece5; border-radius: 6px; padding: 2px 8px; color: var(--ink); }
+.also span.he { direction: rtl; font-size: 15px; }
+.also i { font-style: normal; color: #8a8f98; }
 .eyebrow { font-size: 12px; font-weight: 700; color: var(--gold-text); text-transform: uppercase; letter-spacing: .06em; }
 
 /* nav list */
