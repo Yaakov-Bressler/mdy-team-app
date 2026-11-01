@@ -636,11 +636,13 @@
     var daysTxt = d.days == null ? '–' : Math.abs(d.days);
     var daysLbl = d.days == null ? '' : d.days < 0 ? 'days late' : d.days === 1 ? 'day' : 'days';
     if (d.days === 0) { daysTxt = 'Today'; daysLbl = ''; }
+    var pc = S.tracker ? pace(d, dlTally(d, S.tracker)) : null;
     return '<article class="card dl"><div class="days ' + cls + '"><b>' + esc(daysTxt) + '</b><span>' + esc(daysLbl) + '</span></div><div class="dt">' +
       (job ? '<span class="tag">' + esc(job.value) + '</span>' : '') +
       '<b>' + esc(d.title) + '</b>' +
       other.map(function (l) { return '<span class="clamp">' + esc(l.value) + '</span>'; }).join('') +
       (facts.length ? '<span style="display:flex;gap:6px;flex-wrap:wrap;margin-top:2px">' + facts.join('') + '</span>' : '') +
+      (pc && pc.label !== 'Done' ? paceHtml(d, pc, false) : '') +
       '<span style="color:var(--muted)">' + esc(fmtDate(d.due)) + heb.map(function (l) { return ' · <span lang="he" dir="rtl">' + esc(l.value) + '</span>'; }).join('') + '</span>' +
       '</div></article>';
   }
@@ -2686,17 +2688,10 @@
       return '<section class="card vol" aria-label="' + esc(v.name) + ' by stage"><div class="volhead"><b>' + esc(v.name) + '</b>' + (v.sub ? '<span class="note">' + esc(v.sub) + '</span>' : '') +
         '<span class="note volcount">' + done + ' of ' + total + ' in Final</span></div>' +
         '<div class="bar">' + order.map(function (s) { return '<i style="flex:' + stg[s] + ';background:' + stageColor(s) + '" title="' + esc(s + ': ' + stg[s]) + '"></i>'; }).join('') + '</div>' +
-        '<div class="legend">' + order.map(function (s) { return stageChip(s, s + ' ' + stg[s]); }).join('') + '</div>' + volumePace(v, rows, dls) + '</section>';
+        '<div class="legend">' + order.map(function (s) { return stageChip(s, s + ' ' + stg[s]); }).join('') + '</div></section>';
     }).join('');
   }
-  function volumePace(v, rows, dls) {
-    return (dls || []).filter(function (d) {
-      return d.days != null && dlMasechtos((d.f || {}).Masechta).some(function (m) { return v.masechtos.indexOf(m) > -1; });
-    }).map(function (d) {
-      var t = dlTally(d, rows), p = pace(d, t);
-      return p && p.label !== 'Done' ? paceHtml(d, p, true) : '';
-    }).join('');
-  }
+
 
   async function screenTracker(m) {
     var got = await Promise.all([loadTracker(), loadDeadlines().catch(function () { return []; })]);
@@ -2721,8 +2716,7 @@
     var done = counts.Final || 0;
     var h = volumeBanner(rows, m, dls) + '<section class="card" aria-label="Progress"><div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px"><b>' + esc(m) + ' · ' + shown.length + ' rows</b><span class="note">' + done + ' final</span></div>' +
       '<div class="bar">' + order.map(function (s) { return '<i style="flex:' + counts[s] + ';background:' + stageColor(s) + '" title="' + esc(s) + '"></i>'; }).join('') + '</div>' +
-      '<div class="legend">' + order.map(function (s) { return stageChip(s, s + ' ' + counts[s]); }).join('') + '</div>' +
-      volumePace({ masechtos: [m] }, rows, dls) + '</section>';
+      '<div class="legend">' + order.map(function (s) { return stageChip(s, s + ' ' + counts[s]); }).join('') + '</div></section>';
     h += '<p class="note">Tap an amud to move it, or to open its latest file and history. The star keeps it in My work. The grey tag is how long it has been in its stage: amber after a week, red after two.' + (S.trackerMine ? ' Showing only your amudim.' : '') + '</p>';
     if (S.trackerMine && !cards.length) h += '<div class="card empty">None of ' + esc(m) + '’s amudim is yours. Tap Mine again to see them all.</div>';
     h += '<div class="grid2">' + cards.map(function (r) {
