@@ -43,6 +43,38 @@ window.MDY_CONFIG = {
      together with the relay update. */
   askExtras: false,
   chatUrl: 'https://chat.google.com/room/AAQAnjn0HSU?cls=5',
+  /* Everyone on the team by both addresses: some sign in with their Aleh Zayis (tenant) address, some with their
+     personal one (YB, 1 Nov 2026). The key is the surname, as the Deadlines list's Who column has it.
+     The same table is in the site's MDY Lookup bundle (WX_TEAM); change both together. */
+  team: [
+    { key: 'bressler', name: 'R\u2019 Yaakov Bressler', mail: ['yaakovbressler@alehzayismdy.onmicrosoft.com', 'y.bressler@alehzayis.com', 'yaakovbressler1@gmail.com'] },
+    { key: 'ochs', name: 'R\u2019 Chaim Ochs', mail: ['chaimochs@alehzayismdy.onmicrosoft.com', 'chaimochs@gmail.com'] },
+    { key: 'muller', name: 'R\u2019 Shlomo Muller', mail: ['shlomomuller@alehzayismdy.onmicrosoft.com', 'shlomoymuller@gmail.com'] },
+    { key: 'goodman', name: 'R\u2019 Shimi Goodman', mail: ['shimigoodman@alehzayismdy.onmicrosoft.com', 'shimigoodman26@gmail.com'] },
+    { key: 'waldman', name: 'R\u2019 Shai Waldman', mail: ['shaiwaldman@alehzayismdy.onmicrosoft.com', 'shaiwaldman5@gmail.com'] },
+    { key: 'langer', name: 'R\u2019 Alexander Langer', mail: ['alexanderlanger@alehzayismdy.onmicrosoft.com', 'alexander21057@gmail.com'] },
+    { key: 'rosenfeld', name: 'R\u2019 Dovid Rosenfeld', mail: ['dovidrosenfeld@alehzayismdy.onmicrosoft.com', 'dcrosenfeld18@gmail.com'] },
+    { key: 'spetner', name: 'R\u2019 Kehos Spetner', mail: ['kehosspetner@alehzayismdy.onmicrosoft.com', 'kennethspet2020@gmail.com'] },
+    { key: 'shonek', name: 'R\u2019 Nochum Aharon Shonek', mail: ['nashonek@alehzayismdy.onmicrosoft.com', 'nas35one@gmail.com'] },
+    { key: 'prager', name: 'R\u2019 Moshe Prager', mail: ['mosheprager@alehzayismdy.onmicrosoft.com', 'm.prager@alehzayis.com', 'mprager@norfolkkollel.com'] },
+    { key: 'mayer', name: 'Mrs. Yehudis Mayer', mail: ['yehudismayer@alehzayismdy.onmicrosoft.com', 'mayeryehudis@gmail.com'] },
+    { key: 'revah', name: 'R\u2019 Asher Revah', mail: ['asherrevah@alehzayismdy.onmicrosoft.com', 'revahasher@gmail.com'] },
+    { key: 'schneider', name: 'R\u2019 Itzy Schneider', mail: ['itzyschneider@alehzayismdy.onmicrosoft.com', 'itzy.schneider@gmail.com'] },
+    { key: 'greenes', name: 'R\u2019 Chaim Greenes', mail: ['chaimgreenes@alehzayismdy.onmicrosoft.com', 'cd.greenes@alehzayis.com', 'cgopmi@gmail.com'] },
+    { key: 'szimonowitz', name: 'R\u2019 Shimon Szimonowitz', mail: ['s.szimonowitz@alehzayis.com'] }
+  ],
+  /* Days an amud has sat in one stage before its tag turns amber, then red (as on the site's Workflow cards) */
+  stale: { warn: 7, late: 14 },
+  /* Graphics review buttons (as on the site's Graphics page): who acts in which folder, and where a picture goes.
+     The site owners (gfxAdmins) see the buttons everywhere. */
+  gfxReview: {
+    'Needs Approval': { who: 'shonek', acts: [{ label: 'Approve', to: 'Ready for Designing', go: true }, { label: 'Reject', to: 'Rejected', why: true }] },
+    'Ready for Review': { who: 'muller', acts: [{ label: 'Accept', to: 'Ready to Go', go: true }, { label: 'Send back', to: 'Rejected', why: true }] }
+  },
+  gfxAdmins: ['bressler', 'revah'],
+  /* The site pages that open an amud's latest file and its version history */
+  openAmudPage: 'SitePages/Open-Amud.aspx',
+  historyPage: 'SitePages/History.aspx',
   graphicsStages: ['Requests', 'Writer Requests', 'Prompts', 'Needs Approval', 'Ready for Review', 'Ready for Designer', 'Ready for Designing', 'Pending Charts', 'Ready to Go', 'Rejected'],
   /* The site's colour key, one colour per stage */
   stageColors: {

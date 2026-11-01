@@ -337,3 +337,50 @@ input::placeholder, textarea::placeholder { color: #7b8189; }
 .card.vol { margin-bottom: 12px; }
 .volhead { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin-bottom: 10px; }
 .volhead .volcount { margin-left: auto; }
+
+/* days in stage, pace lines, On your desk, graphics review, editor changes (1 Nov 2026) */
+.indays { display: inline-block; flex: none; font-style: normal; font-family: var(--sans); vertical-align: 1px; padding: 1px 8px; border-radius: 999px; background: #eceae6; color: #5b6470; font-size: 12px; font-weight: 700; white-space: nowrap; }
+.indays.warn { background: #fff3cd; color: #8a5a00; }
+.indays.late { background: #fde2e1; color: #b3261e; }
+.sec .indays { vertical-align: 3px; margin-left: 6px; }
+.row .rt span .indays { margin-right: 6px; }
+.card-btn .stg { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.row .rt b a.openf { color: inherit; text-decoration: none; }
+.row .rt b a.openf:hover, .row .rt b a.openf:focus-visible { text-decoration: underline; }
+.pace { display: flex; align-items: baseline; gap: 8px; margin-top: 8px; font-size: 13px; color: var(--muted); line-height: 1.35; }
+.pace b { color: var(--ink); }
+.pace .pl { flex: none; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 700; white-space: nowrap; }
+.pace .pl.ok { background: #dff3e6; color: #17733a; }
+.pace .pl.warn { background: #fff3cd; color: #8a5a00; }
+.pace .pl.late { background: #fde2e1; color: #b3261e; }
+.pace .pl.wait { background: #e8edf5; color: #2f4a7a; }
+.deskwho { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; font-size: 14px; color: var(--muted); }
+.deskwho select { min-height: 38px; padding: 0 10px; border: 1px solid #c9c4b8; border-radius: 10px; background: #fff; }
+details.later { margin-top: 12px; }
+details.later summary { cursor: pointer; font-weight: 700; min-height: 32px; }
+details.later .rows { margin-top: 10px; }
+.sheetlinks { display: flex; gap: 8px; flex-wrap: wrap; margin: 4px 0 12px; }
+.sheetlinks .btn { flex: 1 1 auto; display: inline-flex; align-items: center; justify-content: center; gap: 6px; text-decoration: none; min-height: 40px; }
+.sheetlinks .btn svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; }
+.chip-mine[aria-pressed="true"] { background: var(--gold) !important; color: var(--navy) !important; border-color: var(--gold) !important; }
+.thumb .gmeta { padding: 0 10px 4px; color: var(--muted); font-size: 12px; }
+.thumb .gacts { display: flex; gap: 6px; flex-wrap: wrap; padding: 0 10px 10px; }
+.thumb .gact { min-height: 36px; padding: 0 12px; border-radius: 10px; border: 1px solid; font-size: 13.5px; font-weight: 700; cursor: pointer; }
+.thumb .gact.go { background: #e6f5ec; border-color: #1db954; color: #17733a; }
+.thumb .gact.no { background: #fdf0ef; border-color: #c0392b; color: #b3261e; }
+.thumb .gact.arm { background: var(--navy); border-color: var(--navy); color: #fff; }
+.thumb .gwhy { margin: 0 10px 8px; width: calc(100% - 20px); border: 1px solid #c9c4b8; border-radius: 8px; padding: 6px 8px; font-size: 13px; resize: vertical; }
+.thumb .gmsg { padding: 0 10px; color: var(--danger); font-size: 12.5px; }
+.thumb .gmsg:empty { display: none; }
+.gdone { background: var(--ok-bg); color: var(--ok-ink); border-radius: 10px; padding: 8px 12px; margin: 0 0 10px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.gdone .chipbtn { min-height: 32px; }
+.edtop { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: baseline; margin-bottom: 10px; }
+.edtop > .note { width: 100%; font-weight: 700; }
+.edchg { font-size: 13.5px; border: 1px solid var(--line); border-radius: 8px; padding: 2px 8px; background: #fff; }
+.view del { background: #fde2e1; color: #8e1e17; text-decoration: line-through; border-radius: 3px; padding: 0 2px; }
+.view ins { background: #dff3e6; color: #17733a; text-decoration: none; border-radius: 3px; padding: 0 2px; }
+.edrow { margin-bottom: 10px; }
+.edref { font-size: 12px; color: var(--gold-text); font-weight: 700; }
+.edheb { font-family: var(--serif); font-size: 18px; color: var(--navy); margin: 2px 0 4px; }
+.edline { font-size: 15px; line-height: 1.5; margin: 2px 0; }
+.edlab { display: inline-block; min-width: 46px; font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
