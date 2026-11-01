@@ -198,8 +198,41 @@
     return n ? n.split(/\s+/) : [];
   }
   function surname() {
+    var t = myTeam();
+    if (t) return t.key;
     var s = (S.me && S.me.surname) || nameParts().slice(-1)[0] || '';
     return s.toLowerCase();
+  }
+  /* ---------- who is who (YB, 1 Nov 2026): some sign in with their Aleh Zayis address, some with their personal one.
+     A person is found by either address (a guest's personal address is read out of his sign-in name), then by surname. */
+  function lastWord(name) {
+    var w = String(name || '').replace(/\([^)]*\)/g, ' ').replace(/[^A-Za-z\u2019' ]/g, ' ').trim().split(/\s+/);
+    return (w[w.length - 1] || '').toLowerCase();
+  }
+  function teamBy(mail, name) {
+    var T = C.team || [], m = String(mail || '').trim().toLowerCase(), i;
+    if (m) for (i = 0; i < T.length; i++) if (T[i].mail.indexOf(m) > -1) return T[i];
+    var last = lastWord(name);
+    if (last) for (i = 0; i < T.length; i++) if (T[i].key === last) return T[i];
+    return null;
+  }
+  function mailsOfMe() {
+    var out = [];
+    [S.me && S.me.mail, S.me && S.me.userPrincipalName].forEach(function (a) {
+      a = String(a || '').toLowerCase(); if (!a) return;
+      if (a.indexOf('#ext#') > -1) { var x = a.split('#ext#')[0], k = x.lastIndexOf('_'); if (k > 0) out.push(x.slice(0, k) + '@' + x.slice(k + 1)); }
+      else out.push(a);
+    });
+    return out;
+  }
+  function myTeam() {
+    if (!S.me) return null;
+    if (S.myTeam !== undefined && S.myTeamFor === S.me) return S.myTeam;
+    var ms = mailsOfMe(), t = null;
+    for (var i = 0; i < ms.length && !t; i++) t = teamBy(ms[i], '');
+    if (!t) { var sn = (S.me.surname || '').toLowerCase() || lastWord(S.me.displayName); t = teamBy('', sn); }
+    S.myTeam = t; S.myTeamFor = S.me;
+    return t;
   }
   function firstName() { return (S.me && S.me.givenName) || nameParts()[0] || ''; }
   function initials() {
@@ -260,6 +293,7 @@
         stage: f.Stage || 'Open', workflow: f.Workflow || '',
         writer: await fieldText(f, 'Writer'), editor: await fieldText(f, 'Editor1'),
         notes: f.Notes || '', due: f.Due || null,
+        since: f.StageSince || null, seen: f.StageSeen || '',
         sort: f.SortKey != null && f.SortKey !== '' && !isNaN(+f.SortKey) ? +f.SortKey : null
       };
     }));
@@ -370,15 +404,92 @@
       return true;
     });
   }
-  function markFromDeadlines() {
+  /* whose deadline: a person on C.team by address or surname, else the name in its Who column */
+  function ownerKey(d) {
+    var f = d.f || {}, p = teamBy(f.OwnerEmail, f.Owner);
+    return p ? p.key : (f.Owner ? 'x:' + String(f.Owner).trim() : '');
+  }
+  function ownerName(d) { var f = d.f || {}, p = teamBy(f.OwnerEmail, f.Owner); return p ? p.name : (f.Owner || ''); }
+  function markFromDeadlines(who) {
     S.fromDl = {};
     if (!S.tracker || !S.deadlines) return;
-    S.deadlines.filter(function (d) { return (d.days == null || d.days >= 0) && deadlineIsMine(d); }).forEach(function (d) {
+    var test = who ? function (d) { return ownerKey(d) === who; } : deadlineIsMine;
+    S.deadlines.filter(function (d) { return (d.days == null || d.days >= 0) && test(d); }).forEach(function (d) {
       dlRows(d, S.tracker).forEach(function (r) {
         /* an amud under two of your deadlines shows the earlier one */
         if (!S.fromDl[r.id] || (d.due && S.fromDl[r.id].due && d.due < S.fromDl[r.id].due)) S.fromDl[r.id] = d;
       });
     });
+  }
+  /* an amud is on the desk now when it has reached the stage just before the one its deadline asks for (or later);
+     earlier than that, it is still coming */
+  function deskNow(r, want) {
+    if (!want) return true;
+    var L = stagesFor(r.masechta, r.workflow), si = L.indexOf(r.stage);
+    var ti = want === 'Post Kramer' ? L.indexOf('Kramer') + 1 : L.indexOf(want);
+    if (ti < 0 || si < 0) return true;
+    return si >= ti - 1;
+  }
+  function dlWant(d) { var t = DL_TARGETS[String((d && d.f && d.f.Target) || '').trim()]; return t ? t.New : null; }
+  /* the deadline's whole tally, as the site counts it (a split amud's parts each weigh 1/n) */
+  function dlTally(d, rows) {
+    var f = d.f || {}, target = String(f.Target || '').trim(), tg = DL_TARGETS[target];
+    if (!tg) return null;
+    var list = dlMasechtos(f.Masechta);
+    if (!list.length) return null;
+    var spec = dlSpec(f.Amudim == null || String(f.Amudim).trim() === '' ? 'all' : f.Amudim), named = {};
+    spec.inc.forEach(function (t) { if (t.mas) named[t.mas] = 1; });
+    var anyNamed = Object.keys(named).length > 0, res = { total: 0, done: 0, ready: 0, wait: 0, multi: list.length > 1 };
+    list.map(function (m) { return m.toLowerCase(); }).filter(function (m) { return !anyNamed || named[m]; }).forEach(function (mas) {
+      var mine = rows.filter(function (r) { return String(r.masechta || '').toLowerCase() === mas; }), parts = {};
+      mine.forEach(function (r) { var a = dlAmud(r.title); if (a) parts[a.ord] = (parts[a.ord] || 0) + 1; });
+      mine.forEach(function (r) {
+        var a = dlAmud(r.title);
+        if (!a || !spec.inc.some(function (t) { return dlHit(t, a, mas); }) || spec.exc.some(function (t) { return dlHit(t, a, mas); })) return;
+        var w = 1 / (parts[a.ord] || 1), wf = dlWf(r.workflow), have = dlRank(r.stage, wf);
+        res.total += w;
+        if (have > -1 && have >= dlRank(tg[wf], wf)) res.done += w;
+        else if (deskNow(r, tg.New)) res.ready += w; else res.wait += w;
+      });
+    });
+    ['total', 'done', 'ready', 'wait'].forEach(function (k) { res[k] = Math.round(res[k] * 100) / 100; });
+    return res;
+  }
+  /* 19.5 -> "19½" */
+  function fmtN(n) {
+    var whole = Math.floor(n + 1e-9), frac = Math.round((n - whole) * 100) / 100;
+    if (!frac) return String(whole);
+    var sym = frac === 0.5 ? '½' : frac === 0.33 ? '⅓' : frac === 0.67 ? '⅔' : frac === 0.25 ? '¼' : frac === 0.75 ? '¾' : null;
+    return sym ? (whole ? String(whole) : '') + sym : String(Math.round(n * 100) / 100);
+  }
+  function workDays(a, b) { /* Sun-Thu days from a to b inclusive, yyyy-mm-dd */
+    var p = function (x) { var q = x.split('-'); return Date.UTC(+q[0], +q[1] - 1, +q[2]) / 864e5; }, n = 0;
+    for (var d = p(a); d <= p(b); d++) if (new Date(d * 864e5).getUTCDay() <= 4) n++;
+    return n;
+  }
+  /* on track or behind, as on the site's Workflow page: a verdict only when nothing in the deadline is still at an
+     earlier stage; otherwise how many are ready and how many are still coming */
+  function pace(d, t) {
+    if (!t || !t.total || !d.due) return null;
+    var left = Math.round((t.total - t.done) * 100) / 100;
+    if (left <= 0) return { cls: 'ok', label: 'Done', text: 'All ' + fmtN(t.total) + ' done' };
+    var today = ymdIn(new Date()), due = ymdIn(new Date(d.due));
+    if (d.days < 0) return { cls: 'late', label: 'Overdue', text: fmtN(left) + ' still to go, was due ' + fmtDate(d.due) };
+    var wd = workDays(today, due), per = wd > 0 ? Math.ceil(left / wd) : 0;
+    var need = per ? ' · needs ' + per + ' a working day from here' : '';
+    var head = fmtN(t.done) + ' of ' + fmtN(t.total) + ' done';
+    if (t.wait > 0) return { cls: 'wait', label: t.ready > 0 ? fmtN(t.ready) + ' ready now' : 'Waiting', text: head + ' · ' + fmtN(t.wait) + ' not yet through the earlier stages' + need };
+    var start = d.created ? ymdIn(new Date(d.created)) : today; if (start > due) start = today;
+    var tot = workDays(start, due), gone = Math.max(0, workDays(start, today) - 1), frac = tot > 0 ? Math.min(1, gone / tot) : 1;
+    var expect = t.total * frac, gap = expect - t.done;
+    var text = head + ', about ' + fmtN(Math.round(expect * 2) / 2) + ' expected by now (straight line from ' + fmtDate(start + 'T12:00:00Z') + ')' + need;
+    if (gap <= 0.5) return { cls: 'ok', label: t.done - expect >= 1 ? 'Ahead' : 'On track', text: text };
+    if (gap <= Math.max(1, t.total * 0.15)) return { cls: 'warn', label: 'A little behind', text: text };
+    return { cls: 'late', label: 'Behind by about ' + fmtN(Math.round(gap * 2) / 2), text: text };
+  }
+  function paceHtml(d, p, withTitle) {
+    if (!p) return '';
+    return '<div class="pace"><span class="pl ' + p.cls + '">' + esc(p.label) + '</span><span class="pt">' + (withTitle ? '<b>' + esc(d.title) + '</b> · ' : '') + esc(p.text) + '</span></div>';
   }
   function isMine(r) {
     var sn = surname();
@@ -401,11 +512,68 @@
     if (i < 0 && C.retiredNext && list.indexOf(C.retiredNext[s]) > -1) return C.retiredNext[s];
     return i > -1 && i < list.length - 1 ? list[i + 1] : s;
   }
+  /* A move forward starts the stage's clock (StageSince, as the site's Next button does). A move back leaves the clock
+     alone: the next tracker load reads the row's history and sets it to when that stage really began (stageSync). */
   async function moveStage(row, stage) {
-    var sid = await siteId();
-    await g('/sites/' + sid + '/lists/' + C.lists.tracker + '/items/' + row.id + '/fields', { method: 'PATCH', body: { Stage: stage } });
+    var sid = await siteId(), list = stagesFor(row.masechta, row.workflow);
+    var from = list.indexOf(row.stage), to = list.indexOf(stage), body = { Stage: stage };
+    if (from < 0 || to > from) { body.StageSince = new Date().toISOString(); body.StageSeen = stage; }
+    await g('/sites/' + sid + '/lists/' + C.lists.tracker + '/items/' + row.id + '/fields', { method: 'PATCH', body: body });
     row.stage = stage; row.f.Stage = stage;
+    if (body.StageSince) { row.since = body.StageSince; row.seen = stage; }
   }
+  /* ---------- days in stage (as on the site's Workflow cards) ---------- */
+  var IDLE = { 'Open': 1, 'Final': 1, 'Closed': 1 };
+  function daysIn(r) {
+    if (!r || IDLE[r.stage] || !r.since || (r.seen && r.seen !== r.stage)) return null;
+    var t = Date.parse(r.since); return isNaN(t) ? null : Math.max(0, Math.floor((Date.now() - t) / 86400000));
+  }
+  function daysChip(r) {
+    var d = daysIn(r); if (d === null) return '';
+    var st = C.stale || { warn: 7, late: 14 }, cls = d >= st.late ? ' late' : d >= st.warn ? ' warn' : '';
+    var tip = 'In ' + r.stage + ' since ' + fmtDate(r.since) + (d >= st.late ? ', sat too long' : d >= st.warn ? ', getting long' : '');
+    return '<i class="indays' + cls + '" title="' + esc(tip) + '">' + (d >= st.warn ? '\u2691 ' : '') + (d < 1 ? 'today' : d < 2 ? '1 day' : d + ' days') + '</i>';
+  }
+  /* the start of the latest run of the row's current stage, from its version history (newest first); a different stage
+     held under 10 minutes and then undone is a slip, not a stage */
+  function runStart(vs, cur) {
+    var t = function (v) { return Date.parse(v.at); }, i = 0;
+    while (i < vs.length && vs[i].stage !== cur) i++;
+    if (i >= vs.length) return null;
+    var start = t(vs[i]);
+    for (var k = i + 1; k < vs.length; k++) {
+      if (vs[k].stage === cur) { start = t(vs[k]); continue; }
+      var e = k; while (e < vs.length && vs[e].stage !== cur) e++;
+      if (e < vs.length && start - t(vs[e - 1]) < 6e5) { k = e - 1; continue; }
+      break;
+    }
+    return new Date(start).toISOString();
+  }
+  var syncing = false;
+  async function stageSync(rows) {
+    if (syncing || TEST) return;
+    var todo = rows.filter(function (r) { return r.stage && (r.seen !== r.stage || !r.since); }).slice(0, 25);
+    if (!todo.length) return;
+    syncing = true;
+    try {
+      var sid = await siteId(), base = '/sites/' + sid + '/lists/' + C.lists.tracker + '/items/';
+      for (var i = 0; i < todo.length; i++) {
+        var r = todo[i];
+        try {
+          var vr = await g(base + r.id + '/versions?$expand=fields($select=Stage)');
+          var vs = (vr.value || []).map(function (v) { return { stage: v.fields && v.fields.Stage, at: v.lastModifiedDateTime }; })
+            .sort(function (a, b) { return a.at < b.at ? 1 : -1; });
+          var since = runStart(vs, r.stage);
+          if (!since) continue;
+          await g(base + r.id + '/fields', { method: 'PATCH', body: { StageSince: since, StageSeen: r.stage } });
+          r.since = since; r.seen = r.stage;
+        } catch (e) { if (e.status === 403 || e.status === 401) break; }
+      }
+    } finally { syncing = false; }
+  }
+  /* the amud's latest file and its history, on the site */
+  function openAmudUrl(r) { return C.siteUrl + '/' + (C.openAmudPage || 'SitePages/Open-Amud.aspx') + '?amud=' + encodeURIComponent(r.title); }
+  function historyUrl(r) { return C.siteUrl + '/' + (C.historyPage || 'SitePages/History.aspx') + '?amud=' + encodeURIComponent(r.title); }
 
   /* ---------- deadlines ---------- */
   async function loadDeadlines(force) {
@@ -435,7 +603,7 @@
         lines.push(line);
       }
       var due = dueCol ? f[dueCol.name] : null;
-      return { id: it.id, f: f, title: f.Title || '', due: due, days: daysUntil(due), lines: lines };
+      return { id: it.id, f: f, title: f.Title || '', due: due, days: daysUntil(due), lines: lines, created: it.createdDateTime || null };
     }));
     items.sort(function (a, b) { return (a.due || '9') < (b.due || '9') ? -1 : 1; });
     S.deadlines = items;
@@ -444,9 +612,10 @@
   /* yours when your name is in its Who (Owner) column or its title. Not the Details: they can name other people
      ("Perakim 1-3 have their own rows (R' Langer, R' Ochs)" on an unassigned row). */
   function deadlineIsMine(d) {
+    var f = d.f || {}, t = myTeam();
+    if (t) { var p = teamBy(f.OwnerEmail, f.Owner); if (p) return p.key === t.key; }
     var sn = surname();
     if (!sn) return false;
-    var f = d.f || {};
     return (String(f.Owner || '') + ' ' + d.title).toLowerCase().indexOf(sn) > -1;
   }
   function deadlineCard(d) {
@@ -467,11 +636,13 @@
     var daysTxt = d.days == null ? '–' : Math.abs(d.days);
     var daysLbl = d.days == null ? '' : d.days < 0 ? 'days late' : d.days === 1 ? 'day' : 'days';
     if (d.days === 0) { daysTxt = 'Today'; daysLbl = ''; }
+    var pc = S.tracker ? pace(d, dlTally(d, S.tracker)) : null;
     return '<article class="card dl"><div class="days ' + cls + '"><b>' + esc(daysTxt) + '</b><span>' + esc(daysLbl) + '</span></div><div class="dt">' +
       (job ? '<span class="tag">' + esc(job.value) + '</span>' : '') +
       '<b>' + esc(d.title) + '</b>' +
       other.map(function (l) { return '<span class="clamp">' + esc(l.value) + '</span>'; }).join('') +
       (facts.length ? '<span style="display:flex;gap:6px;flex-wrap:wrap;margin-top:2px">' + facts.join('') + '</span>' : '') +
+      (pc && pc.label !== 'Done' ? paceHtml(d, pc, false) : '') +
       '<span style="color:var(--muted)">' + esc(fmtDate(d.due)) + heb.map(function (l) { return ' · <span lang="he" dir="rtl">' + esc(l.value) + '</span>'; }).join('') + '</span>' +
       '</div></article>';
   }
@@ -576,8 +747,119 @@
     { key: 'Headers', kind: 'headers', ph: 'Which header was used?' },
     { key: 'Definitions', kind: 'doc', match: /definition/i, ph: 'Look up a term', table: false },   // plain paragraphs: "term (definition)"
     { key: 'Rulings', kind: 'doc', match: /rulings/i, ph: 'What’s our rule on…', table: false },
-    { key: 'Style', kind: 'doc', match: /style guide/i, ph: 'Search the Style Guide', table: false }
+    { key: 'Style', kind: 'doc', match: /style guide/i, ph: 'Search the Style Guide', table: false },
+    { key: 'Edits', kind: 'edits', ph: 'How do editors usually change this?' }
   ];
+
+  /* ---------- Guide: how editors usually change this (the site Guide's "edits" look-up, Site Assets/MDYLookup/edits-index.json):
+     each row is a passage as the writer (Kerisos) or the first editor (Temurah) left it, against the delivered Final ---------- */
+  async function loadEdits(onStatus) {
+    if (!S.edits) {
+      var j = await assetJson('edits-index.json', onStatus);
+      S.edits = { built: j.built, rows: (j.rows || []).map(function (r) {
+        return { m: r[0], daf: r[1], who: r[2], heb: r[3], pre: r[4], fin: r[5], ch: !!r[6], src: r[7], npre: edNorm(r[4]), nfin: edNorm(r[5]) };
+      }) };
+    }
+    return S.edits;
+  }
+  function edNorm(x) { return ' ' + String(x || '').toLowerCase().replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(/[^a-z0-9'א-ת]+/g, ' ').trim() + ' '; }
+  function edNormC(x) { return ' ' + String(x || '').replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(/[^A-Za-z0-9'א-ת]+/g, ' ').trim() + ' '; }
+  function edHeb(x) { return ' ' + String(x || '').replace(/[֑-ׇ]/g, '').replace(/[^א-ת]+/g, ' ').trim() + ' '; }
+  function edToks(x) { return String(x || '').match(/\S+/g) || []; }
+  /* case is kept: Kohen -> kohen is a change the house makes */
+  function edKey(w) { return w.replace(/[‘’]/g, "'").replace(/^[^A-Za-z0-9'א-ת]+|[^A-Za-z0-9'א-ת]+$/g, ''); }
+  function edDiff(a, b) {
+    var A = edToks(a), B = edToks(b), n = A.length, m = B.length;
+    if (n * m > 90000) return [['-', A], ['+', B]];
+    var ka = A.map(edKey), kb = B.map(edKey), L = [], i, j;
+    for (i = 0; i <= n; i++) L[i] = new Int16Array(m + 1);
+    for (i = n - 1; i >= 0; i--) for (j = m - 1; j >= 0; j--) L[i][j] = ka[i] === kb[j] && ka[i] ? L[i + 1][j + 1] + 1 : Math.max(L[i + 1][j], L[i][j + 1]);
+    var out = [];
+    function push(op, w) { if (out.length && out[out.length - 1][0] === op) out[out.length - 1][1].push(w); else out.push([op, [w]]); }
+    i = 0; j = 0;
+    while (i < n && j < m) {
+      if (ka[i] === kb[j] && ka[i]) { push('=', B[j]); i++; j++; }
+      else if (L[i + 1][j] >= L[i][j + 1]) push('-', A[i++]); else push('+', B[j++]);
+    }
+    while (i < n) push('-', A[i++]);
+    while (j < m) push('+', B[j++]);
+    return out;
+  }
+  function edHunks(d, qk) {
+    var out = [];
+    for (var i = 0; i < d.length; i++) {
+      if (d[i][0] === '=') continue;
+      var del = [], ins = [];
+      while (i < d.length && d[i][0] !== '=') { if (d[i][0] === '-') del = del.concat(d[i][1]); else ins = ins.concat(d[i][1]); i++; }
+      i--;
+      var words = del.concat(ins).map(function (w) { return edKey(w).toLowerCase(); });
+      if (!qk.length || qk.some(function (w) { return words.indexOf(w) > -1; })) out.push([del.join(' '), ins.join(' ')]);
+    }
+    return out;
+  }
+  function edMark(d) {
+    return [
+      d.filter(function (x) { return x[0] !== '+'; }).map(function (x) { return x[0] === '-' ? '<del>' + esc(x[1].join(' ')) + '</del>' : esc(x[1].join(' ')); }).join(' '),
+      d.filter(function (x) { return x[0] !== '-'; }).map(function (x) { return x[0] === '+' ? '<ins>' + esc(x[1].join(' ')) + '</ins>' : esc(x[1].join(' ')); }).join(' ')
+    ];
+  }
+  function renderEdits() {
+    var E = S.edits; if (!E) return;
+    var q = (S.guideQ || '').trim(), onlyCh = S.edAll ? false : true, limit = S.limit || 25;
+    var foot = '<p class="note">' + E.rows.length.toLocaleString() + ' aligned passages: Kerisos as the writer handed it in, Temurah as the first editor left it, each against the delivered Final. The same data as the site’s Guide. Built ' + esc(E.built) + '.</p>';
+    if (!q) { setView('<div class="card empty">Type an English phrase as a draft might have it (in order to, malkus, the Gemara asks), or Hebrew from the Gemara. You see how the editors changed it on the way to the delivered page, and how often they left it alone.</div>' + foot); return; }
+    var heb = hasHe(q), nq = heb ? edHeb(q).trim() : edNorm(q).trim();
+    if (!nq) { setView(foot); return; }
+    var qk = heb ? [] : nq.split(' ');
+    /* capitals in the search count (Kohen is not kohen), except the first letter of a phrase of several words */
+    var cased = !heb && /[A-Z]/.test(q), cq = edNormC(q).trim(), cvars = [cq];
+    if (cq.indexOf(' ') > -1) { var f0 = cq.charAt(0); cvars.push((f0 === f0.toUpperCase() ? f0.toLowerCase() : f0.toUpperCase()) + cq.slice(1)); }
+    function has(lower, raw, key, r) {
+      if (lower.indexOf(' ' + nq + ' ') < 0) return false;
+      if (!cased) return true;
+      var c = r[key] || (r[key] = edNormC(raw));
+      return cvars.some(function (v) { return c.indexOf(' ' + v + ' ') > -1; });
+    }
+    var hits = E.rows.filter(function (r) { return heb ? (' ' + r.heb + ' ').indexOf(' ' + nq + ' ') > -1 || r.heb.indexOf(nq) > -1 : has(r.npre, r.pre, 'cpre', r); });
+    var ms = {}; hits.forEach(function (r) { ms[r.m] = (ms[r.m] || 0) + 1; });
+    if (S.edM && !ms[S.edM]) S.edM = '';
+    var pool = hits.filter(function (r) { return !S.edM || r.m === S.edM; }), changed = pool.filter(function (r) { return r.ch; });
+    var chips = '<div class="chips" role="group" aria-label="Show" style="margin-bottom:10px"><button class="chipbtn" data-act="edch" aria-pressed="' + onlyCh + '">Changed only</button>' +
+      (Object.keys(ms).length > 1 ? ['<button class="chipbtn" data-act="edm" data-m="" aria-pressed="' + !S.edM + '">All</button>'].concat(Object.keys(ms).map(function (m) {
+        return '<button class="chipbtn" data-act="edm" data-m="' + esc(m) + '" aria-pressed="' + (S.edM === m) + '">' + esc(m) + ' ' + ms[m] + '</button>';
+      })).join('') : '') + '</div>';
+    if (!pool.length) { setView(chips + '<div class="card empty">' + (heb ? 'No aligned passage has that Hebrew.' : 'No draft in these passages wrote “' + esc(q) + '”.') + '</div>' + foot); return; }
+    var kept = heb ? pool.length - changed.length : pool.filter(function (r) { return has(r.nfin, r.fin, 'cfin', r); }).length;
+    var tally = {}, diffs = [], broad = 0;
+    changed.forEach(function (r, i) {
+      var d = edDiff(r.pre, r.fin); diffs[i] = d;
+      edHunks(d, qk).forEach(function (hk) {
+        if (edToks(hk[0]).length > 8 || edToks(hk[1]).length > 8) { broad++; return; }
+        var nk = function (x) { return edToks(x).map(edKey).filter(Boolean).join(' '); };
+        if (nk(hk[0]) === nk(hk[1])) return;
+        var k = (nk(hk[0]) || '∅') + ' → ' + (nk(hk[1]) || '∅');
+        tally[k] = (tally[k] || 0) + 1;
+      });
+    });
+    var top = Object.keys(tally).sort(function (a, b) { return tally[b] - tally[a]; }).slice(0, 12);
+    var h = chips + '<p class="note"><b>' + pool.length + '</b> passage' + (pool.length === 1 ? '' : 's') + (heb ? '' : ' where the draft said “' + esc(q) + '”') +
+      ' · <b>' + changed.length + '</b> changed by the editors' + (heb ? '' : ' · the delivered page still says it in <b>' + kept + '</b>') + '</p>';
+    if (top.length) h += '<div class="card edtop"><span class="note">Most common changes' + (heb ? '' : ' touching these words') + '</span>' + top.map(function (k) {
+      var p = k.split(' → ');
+      return '<span class="edchg"><del>' + esc(p[0]) + '</del> → <ins>' + esc(p[1]) + '</ins> <b>' + tally[k] + '×</b></span>';
+    }).join('') + '</div>';
+    if (broad) h += '<p class="note">' + (top.length ? 'Plus ' : '') + broad + ' change' + (broad === 1 ? '' : 's') + ' that ' + (broad === 1 ? 'is' : 'are') + ' part of a longer rewrite (see the passages below).</p>';
+    var show = onlyCh ? changed : pool;
+    h += show.slice(0, limit).map(function (r) {
+      var ci = changed.indexOf(r), d = r.ch ? (diffs[ci] || edDiff(r.pre, r.fin)) : [['=', edToks(r.fin)]], mk = edMark(d);
+      return '<article class="card edrow"><div class="edref">' + esc(r.m + ' ' + r.daf) + ' · ' + esc(r.src === 'w' ? 'writer ' + r.who : 'first edit ' + r.who) + (r.ch ? '' : ' · unchanged') + '</div>' +
+        '<div class="edheb" dir="rtl" lang="he">' + esc(r.heb) + '</div>' +
+        (r.ch ? '<div class="edline"><span class="edlab">Draft</span>' + mk[0] + '</div>' : '') +
+        '<div class="edline"><span class="edlab">Final</span>' + mk[1] + '</div></article>';
+    }).join('');
+    if (show.length > limit) h += '<button class="btn ghost block" data-act="edmore">Show more (' + (show.length - limit) + ' left)</button>';
+    setView(h + foot);
+  }
 
   /* ---------- the Guide page's corpus and headers index (Site Assets/MDYLookup) ---------- */
   var IDB = null;
@@ -2338,18 +2620,35 @@
     loading();
     var res = await Promise.all([loadTracker(), loadDeadlines().catch(function () { return []; })]);
     var rows = res[0], dls = res[1];
-    markFromDeadlines();
-    var mine = rows.filter(isMine);
+    stageSync(rows);
+    /* someone else's desk (picked below): only the amudim from his deadlines */
+    var owners = {}, oorder = [], mk = (myTeam() || {}).key;
+    dls.forEach(function (d) {
+      if (d.days == null || d.days < 0 || !DL_TARGETS[String((d.f || {}).Target || '').trim()]) return;
+      var k = ownerKey(d); if (!k || k === mk || owners[k]) return;
+      owners[k] = ownerName(d); oorder.push(k);
+    });
+    var who = S.deskWho && owners[S.deskWho] ? S.deskWho : '';
+    markFromDeadlines(who || null);
+    var mine = who ? rows.filter(function (r) { return S.fromDl[r.id]; }) : rows.filter(isMine);
+    var now = mine.filter(function (r) { var d = S.fromDl[r.id]; return !d || isStarred(r.id) || deskNow(r, dlWant(d)); });
+    var later = mine.filter(function (r) { return now.indexOf(r) < 0; });
     var upcoming = dls.filter(function (d) { return d.days != null && d.days >= 0; });
-    var myNext = upcoming.filter(deadlineIsMine)[0] || upcoming[0];
+    var myNext = (who ? upcoming.filter(function (d) { return ownerKey(d) === who; })[0] : upcoming.filter(deadlineIsMine)[0]) || upcoming[0];
     frame({ title: 'My work', tab: 'home', refresh: true, kicker: (S.me && S.me.displayName) || 'MDY Aleh Zayis Team' });
     var h = '<div class="homegrid"><div class="hg-top">';
     if (myNext) h += '<a class="card dl" href="#/deadlines" style="text-decoration:none">' + deadlineCard(myNext).replace(/^<article class="card dl">|<\/article>$/g, '') + '</a>';
     h += '<a class="btn block" href="#/submit">' + ICON.up + 'Submit work</a></div><div class="hg-list">';
-    h += '<h2 class="sec">Your amudim <small>' + mine.length + '</small></h2>';
-    if (mine.length) h += '<div class="rows">' + mine.map(rowHtml).join('') + '</div>';
-    else h += '<div class="card empty">Nothing is under your name yet. Tap the star on any amud in the Tracker to keep it here.</div>';
-    if (mine.length) h += '<p class="note">Amudim from your deadlines that haven’t reached the deadline’s stage, plus any you’ve starred.</p>';
+    var long = now.filter(function (r) { var d = daysIn(r); return d !== null && d >= (C.stale || { warn: 7 }).warn; }).length;
+    h += '<h2 class="sec">' + (who ? esc(owners[who]) + '’s desk' : 'On your desk') + ' <small>' + now.length + '</small>' + (long ? ' <i class="indays warn">' + long + ' a week or more</i>' : '') + '</h2>';
+    if (oorder.length) h += '<label class="deskwho">Show <select data-act="deskwho"><option value="">Me</option>' + oorder.map(function (k) {
+      return '<option value="' + esc(k) + '"' + (k === who ? ' selected' : '') + '>' + esc(owners[k]) + '</option>';
+    }).join('') + '</select></label>';
+    if (now.length) h += '<div class="rows">' + now.map(rowHtml).join('') + '</div>';
+    else if (!later.length) h += '<div class="card empty">' + (who ? 'Nothing on this desk from the Deadlines list.' : 'Nothing is under your name yet. Tap the star on any amud in the Tracker to keep it here.') + '</div>';
+    else h += '<div class="card empty">Nothing has reached ' + (who ? 'this' : 'your') + ' desk yet.</div>';
+    if (later.length) h += '<details class="card later"><summary>Coming later (' + later.length + ', still at earlier stages)</summary><div class="rows">' + later.map(rowHtml).join('') + '</div></details>';
+    if (mine.length) h += '<p class="note">Amudim from ' + (who ? 'his' : 'your') + ' deadlines that haven’t reached the deadline’s stage' + (who ? '' : ', plus any you’ve starred') + '. The grey tag is how long an amud has been in its stage; amber after a week, red after two. Tap a name to open its latest file.</p>';
     h += '</div><div class="hg-links"><h2 class="sec">Quick links</h2><div class="card pad0 navlist">' +
       '<a href="#/guide">' + ICON.pen.replace('M4 20l1-4L16 5a2.1 2.1 0 0 1 3 3L8 19z', 'M11 4.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zM16 16l4.5 4.5') + '<span class="grow">Look-ups, phrases and headers</span>' + ICON.chev + '</a>' +
       '<a href="#/ask">' + ICON.ask + '<span class="grow">Ask Chaim Levy</span><span class="aside">AI assistant</span>' + ICON.chev + '</a>' +
@@ -2362,7 +2661,7 @@
     var c = stageColor(r.stage);
     return '<div class="row" style="border-left-color:' + c + '">' +
       '<button class="star" data-act="star" data-id="' + esc(r.id) + '" aria-pressed="' + isStarred(r.id) + '" aria-label="Keep ' + esc(r.title) + ' in My work">' + ICON.star + '</button>' +
-      '<div class="rt"><b>' + esc(r.title) + '</b><span>' + esc(personLine(r) || r.notes || '') + '</span></div>' +
+      '<div class="rt"><b><a class="openf" href="' + esc(openAmudUrl(r)) + '" target="_blank" rel="noopener" title="Open the latest file">' + esc(r.title) + '</a></b><span>' + daysChip(r) + esc(personLine(r) || r.notes || '') + '</span></div>' +
       '<button class="chipbtn" style="border:none;padding:0;background:transparent" data-act="move" data-id="' + esc(r.id) + '" aria-label="Move ' + esc(r.title) + ', now ' + esc(r.stage) + '">' + stageChip(r.stage) + '</button>' +
       '<a class="star" href="#/submit/' + esc(r.id) + '" aria-label="Submit work for ' + esc(r.title) + '" style="color:var(--navy)"><svg viewBox="0 0 24 24" aria-hidden="true" style="fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round"><path d="M12 16V5M6.5 10.5L12 5l5.5 5.5M5 20h14"/></svg></a>' +
       '</div>';
@@ -2371,7 +2670,7 @@
   /* The site's Workflow page banner: one bar per volume in production, every stage, Final and Closed shown together as Final.
      A bar shows from its 'from' date (Israel time) until every amud in it is Final, then hides itself (YB, 18 Oct 2026).
      A one-masechta volume is left out while that masechta is the one in view, since its own card shows the same. */
-  function volumeBanner(rows, inView) {
+  function volumeBanner(rows, inView, dls) {
     var today = ymdIn(new Date());
     return (C.volumes || []).map(function (v) {
       if (v.from && today < v.from) return '';
@@ -2393,8 +2692,12 @@
     }).join('');
   }
 
+
   async function screenTracker(m) {
-    var rows = await loadTracker();
+    var got = await Promise.all([loadTracker(), loadDeadlines().catch(function () { return []; })]);
+    var rows = got[0], dls = got[1];
+    stageSync(rows);
+    markFromDeadlines();
     var ms = [];
     rows.forEach(function (r) { if (ms.indexOf(r.masechta) < 0) ms.push(r.masechta); });
     m = m || S.trackerM || ms[0];
@@ -2402,21 +2705,23 @@
     S.trackerM = m;
     var chips = '<div class="chips scroll" role="group" aria-label="Masechta">' + ms.map(function (x) {
       return '<button class="chipbtn" data-act="tm" data-m="' + esc(x) + '" aria-pressed="' + (x === m) + '">' + esc(x) + '</button>';
-    }).join('') + '</div>';
+    }).join('') + '<button class="chipbtn chip-mine" data-act="tmine" aria-pressed="' + !!S.trackerMine + '">Mine</button></div>';
     frame({ title: 'Tracker', tab: 'tracker', refresh: true, kicker: 'Amud Tracker', sub: chips });
     var shown = rows.filter(function (r) { return r.masechta === m; });
+    var cards = S.trackerMine ? shown.filter(isMine) : shown;
     var counts = {};
     shown.forEach(function (r) { var st = r.stage === 'Closed' ? 'Final' : r.stage; counts[st] = (counts[st] || 0) + 1; });
     var mlist = stagesFor(m);
     var order = mlist.filter(function (s) { return counts[s]; }).concat(Object.keys(counts).filter(function (s) { return mlist.indexOf(s) < 0; }));
     var done = counts.Final || 0;
-    var h = volumeBanner(rows, m) + '<section class="card" aria-label="Progress"><div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px"><b>' + esc(m) + ' · ' + shown.length + ' rows</b><span class="note">' + done + ' final</span></div>' +
+    var h = volumeBanner(rows, m, dls) + '<section class="card" aria-label="Progress"><div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px"><b>' + esc(m) + ' · ' + shown.length + ' rows</b><span class="note">' + done + ' final</span></div>' +
       '<div class="bar">' + order.map(function (s) { return '<i style="flex:' + counts[s] + ';background:' + stageColor(s) + '" title="' + esc(s) + '"></i>'; }).join('') + '</div>' +
       '<div class="legend">' + order.map(function (s) { return stageChip(s, s + ' ' + counts[s]); }).join('') + '</div></section>';
-    h += '<p class="note">Tap an amud to move it to another stage. The star keeps it in My work.</p>';
-    h += '<div class="grid2">' + shown.map(function (r) {
+    h += '<p class="note">Tap an amud to move it, or to open its latest file and history. The star keeps it in My work. The grey tag is how long it has been in its stage: amber after a week, red after two.' + (S.trackerMine ? ' Showing only your amudim.' : '') + '</p>';
+    if (S.trackerMine && !cards.length) h += '<div class="card empty">None of ' + esc(m) + '’s amudim is yours. Tap Mine again to see them all.</div>';
+    h += '<div class="grid2">' + cards.map(function (r) {
       return '<div style="position:relative"><button class="card-btn" style="border-top-color:' + stageColor(r.stage) + ';width:100%" data-act="move" data-id="' + esc(r.id) + '">' +
-        '<b>' + esc(r.title.replace(new RegExp('^' + m + '\\s+'), '')) + '</b>' + stageChip(r.stage) + '<span class="who">' + esc(personLine(r)) + '</span></button>' +
+        '<b>' + esc(r.title.replace(new RegExp('^' + m + '\\s+'), '')) + '</b><span class="stg">' + stageChip(r.stage) + daysChip(r) + '</span><span class="who">' + esc(personLine(r)) + '</span></button>' +
         '<button class="star" style="position:absolute;top:4px;right:2px" data-act="star" data-id="' + esc(r.id) + '" aria-pressed="' + isStarred(r.id) + '" aria-label="Keep ' + esc(r.title) + ' in My work">' + ICON.star + '</button></div>';
     }).join('') + '</div>';
     if (!shown.length) h = '<div class="card empty">No rows for ' + esc(m) + '.</div>';
@@ -2427,7 +2732,9 @@
     var list = stagesFor(row.masechta, row.workflow);
     var w = $('#sheet');
     w.innerHTML = '<div class="sheet" role="dialog" aria-modal="true" aria-label="Move ' + esc(row.title) + '">' +
-      '<h2>Move ' + esc(row.title) + '</h2><p class="note">Now at ' + esc(row.stage) + '. Pick its new stage.</p>' +
+      '<h2>Move ' + esc(row.title) + '</h2><p class="note">Now at ' + esc(row.stage) + (daysIn(row) !== null ? ', ' + (daysIn(row) < 1 ? 'since today' : 'for ' + daysIn(row) + (daysIn(row) === 1 ? ' day' : ' days')) : '') + '. Pick its new stage.</p>' +
+      '<div class="sheetlinks"><a class="btn ghost" href="' + esc(openAmudUrl(row)) + '" target="_blank" rel="noopener">' + ICON.ext + 'Open the latest file</a>' +
+      '<a class="btn ghost" href="' + esc(historyUrl(row)) + '" target="_blank" rel="noopener">' + ICON.ext + 'History</a></div>' +
       '<div class="opts">' + list.map(function (s) {
         var c = stageColor(s);
         return '<button data-act="pickstage" data-s="' + esc(s) + '" aria-current="' + (s === row.stage) + '" style="background:' + c + ';color:' + (LIGHT[c] ? '#1a1814' : '#fff') + '">' + esc(s) + '</button>';
@@ -2581,8 +2888,14 @@
     inp.addEventListener('input', function () {
       S.guideQ = inp.value; S.expanded = {}; S.limit = 25; S.llimit = 6;
       clearTimeout(screenGuide._t);
-      screenGuide._t = setTimeout(mode.kind === 'doc' ? renderGuideResults : renderIndexResults, mode.kind === 'corpus' ? 280 : 150);
+      screenGuide._t = setTimeout(mode.kind === 'doc' ? renderGuideResults : mode.kind === 'edits' ? renderEdits : renderIndexResults, mode.kind === 'corpus' ? 280 : 150);
     });
+    if (mode.kind === 'edits') {
+      loading('Opening the edits…');
+      try { await loadEdits(function (msg) { loading(msg); }); } catch (e) { fail(e, screenGuide); return; }
+      renderEdits();
+      return;
+    }
     if (mode.kind === 'doc') {
       loading('Opening the ' + mode.key.toLowerCase() + ' document…');
       try { await loadDoc(mode); } catch (e) { fail(e, screenGuide); return; }
@@ -2607,7 +2920,7 @@
   }
   function renderIndexResults() {
     var mode = guideMode();
-    if (mode.kind === 'doc') return;
+    if (mode.kind !== 'corpus' && mode.kind !== 'headers') return;
     var idx = S.cidx;
     if (!idx) return;
     var names = S.cFilter === 'All' ? idx.masechtos.map(function (x) { return x.name; }) : [S.cFilter];
@@ -2824,11 +3137,19 @@
       var sf = items.filter(function (x) { return x.folder && x.name === stageName; })[0];
       frame({ title: stageName, tab: 'more', back: '#/graphics', backLabel: m + ' graphics', refresh: true });
       if (!sf) { setView('<div class="card empty">That folder is gone.</div>'); return; }
-      var files = (await kids(sf.id, '&$expand=thumbnails&$select=id,name,file,folder,webUrl')).filter(function (x) { return x.file; });
-      setView(files.length ? '<div class="thumbs">' + files.map(function (f) {
+      var files = (await kids(sf.id, '&$expand=thumbnails&$select=id,name,file,folder,webUrl,lastModifiedDateTime,lastModifiedBy')).filter(function (x) { return x.file; });
+      var rv = (C.gfxReview || {})[stageName], acts = rv && gfxMayAct(rv) ? rv.acts : null;
+      S.gfx = { m: m, stage: stageName, gf: gf, items: items, files: files };
+      var head = rv ? '<p class="note">' + esc(rv.who === 'shonek' ? 'R’ Shonek approves or rejects here.' : 'R’ Muller accepts or sends back here.') +
+        (acts ? ' Each button asks once more before it moves the picture; nothing is deleted.' : ' The buttons show for him and the site owners.') + '</p><div id="gfxDone"></div>' : '';
+      setView(files.length ? head + '<div class="thumbs">' + files.map(function (f, k) {
         var t = f.thumbnails && f.thumbnails[0] && (f.thumbnails[0].large || f.thumbnails[0].medium);
-        return '<a class="thumb" href="' + esc(f.webUrl) + '" target="_blank" rel="noopener"><div class="img"' + (t ? ' style="background-image:url(\'' + esc(t.url) + '\')"' : '') + '>' + (t ? '' : esc((f.name.split('.').pop() || '').toUpperCase())) + '</div><span>' + esc(f.name) + '</span></a>';
-      }).join('') + '</div>' : '<div class="card empty">This folder is empty.</div>');
+        var who = f.lastModifiedBy && f.lastModifiedBy.user ? f.lastModifiedBy.user.displayName : '';
+        return '<div class="thumb"><a href="' + esc(f.webUrl) + '" target="_blank" rel="noopener" style="text-decoration:none;color:inherit"><div class="img"' + (t ? ' style="background-image:url(\'' + esc(t.url) + '\')"' : '') + '>' + (t ? '' : esc((f.name.split('.').pop() || '').toUpperCase())) + '</div><span>' + esc(f.name) + '</span></a>' +
+          (acts ? '<span class="gmeta">' + esc([fmtDate(f.lastModifiedDateTime), who].filter(Boolean).join(' · ')) + '</span><div class="gacts">' + acts.map(function (a, j) {
+            return '<button class="gact ' + (a.go ? 'go' : 'no') + '" data-act="gfx" data-k="' + k + '" data-j="' + j + '">' + esc(a.label) + '</button>';
+          }).join('') + '</div><div class="gmsg"></div>' : '') + '</div>';
+      }).join('') + '</div>' : head + '<div class="card empty">This folder is empty.</div>');
       return;
     }
     frame({ title: 'Graphics', tab: 'more', back: '#/more', backLabel: 'More', refresh: true, sub: sub });
@@ -2844,6 +3165,70 @@
       }).join('') + '</div>';
     if (sheets.length) h += '<div class="card pad0 navlist">' + sheets.map(function (f) { return '<a href="' + esc(f.webUrl) + '" target="_blank" rel="noopener">' + ICON.ext + '<span class="grow">' + esc(f.name) + '</span></a>'; }).join('') + '</div>';
     setView(h);
+  }
+
+  /* ---------- graphics review: Approve / Reject (R' Shonek), Accept / Send back (R' Muller), as on the site ---------- */
+  function gfxMayAct(rv) {
+    var t = myTeam(); if (!t) return false;
+    return t.key === rv.who || (C.gfxAdmins || []).indexOf(t.key) > -1;
+  }
+  function gfxDay() { return ymdIn(new Date()).replace(/-/g, ''); }
+  async function gfxFolder(name) {
+    var G = S.gfx, hit = G.items.filter(function (x) { return x.folder && x.name === name; })[0];
+    if (hit) return hit;
+    var d = await driveId();
+    var made = await g('/drives/' + d + '/items/' + G.gf.id + '/children', { method: 'POST', body: { name: name, folder: {}, '@microsoft.graph.conflictBehavior': 'fail' } });
+    G.items.push(made);
+    return made;
+  }
+  async function gfxMove(itemId, folderId, name) {
+    var d = await driveId();
+    return g('/drives/' + d + '/items/' + itemId + '?@microsoft.graph.conflictBehavior=fail', { method: 'PATCH', body: { parentReference: { id: folderId }, name: name } });
+  }
+  async function gfxAct(btn) {
+    var G = S.gfx; if (!G) return;
+    var rv = C.gfxReview[G.stage], k = +btn.getAttribute('data-k'), a = rv.acts[+btn.getAttribute('data-j')], f = G.files[k];
+    var cell = btn.closest('.thumb'), msg = cell.querySelector('.gmsg');
+    if (!btn.classList.contains('arm')) {
+      $$('.gact.arm').forEach(function (x) { x.classList.remove('arm'); x.textContent = x.getAttribute('data-l') || x.textContent; });
+      btn.setAttribute('data-l', btn.textContent); btn.classList.add('arm'); btn.textContent = 'Move to ' + a.to + '?';
+      if (a.why && !cell.querySelector('.gwhy')) msg.insertAdjacentHTML('beforebegin', '<textarea class="gwhy" rows="2" placeholder="Why? (saved with the picture in Rejected)"></textarea>');
+      return;
+    }
+    var why = cell.querySelector('.gwhy'), reason = why ? why.value.trim() : '';
+    btn.disabled = true; msg.textContent = 'Moving…';
+    try {
+      var dest = await gfxFolder(a.to), name = f.name, moved;
+      try { moved = await gfxMove(f.id, dest.id, name); }
+      catch (e) {
+        if (e.status !== 409) throw e;
+        name = f.name.replace(/(\.[^.]+)$/, (a.to === 'Rejected' ? '_rejected-' : '_moved-') + gfxDay() + '$1');
+        moved = await gfxMove(f.id, dest.id, name);
+      }
+      if (a.why) {
+        var who = (myTeam() || {}).name || (S.me && S.me.displayName) || 'someone';
+        var note = (a.label === 'Send back' ? 'Sent back' : 'Rejected') + ' from ' + G.stage + ' by ' + who + ' on ' + ymdIn(new Date()) + ' (Team App).\n' +
+          'Picture: ' + name + '\n' + (reason ? 'Why: ' + reason + '\n' : 'No reason given.\n') + 'To undo: move ' + name + ' back to Graphics/' + G.stage + '.\n';
+        try {
+          var dd = await driveId();
+          await g('/drives/' + dd + '/items/' + dest.id + ':/' + encodeURIComponent(name.replace(/\.[^.]+$/, '') + '_why-' + gfxDay() + '.txt') + ':/content',
+            { method: 'PUT', body: new Blob([note], { type: 'text/plain' }), headers: { 'Content-Type': 'text/plain' } });
+        } catch (x) { /* the move stands without the note */ }
+      }
+      var src = G.items.filter(function (x) { return x.folder && x.name === G.stage; })[0];
+      S.gfxUndo = { id: (moved && moved.id) || f.id, back: src && src.id, name: f.name, to: a.to };
+      S.folders = {}; /* the folder listings changed */
+      await route();
+      var box = $('#gfxDone');
+      if (box) box.innerHTML = '<div class="gdone">Moved <b>' + esc(name) + '</b> to ' + esc(a.to) + '. <button class="chipbtn" data-act="gfxundo">Undo</button></div>';
+    } catch (e) {
+      btn.disabled = false; msg.textContent = 'Could not move it (' + e.message + '). Nothing changed.';
+    }
+  }
+  async function gfxUndo() {
+    var u = S.gfxUndo; if (!u || !u.back) return;
+    try { await gfxMove(u.id, u.back, u.name); S.gfxUndo = null; S.folders = {}; toast('Moved back'); route(); }
+    catch (e) { toast('Could not undo: ' + e.message); }
   }
 
   var APP_CAT = 'Team App';
@@ -3034,7 +3419,7 @@
     }
   }
   async function refresh() {
-    S.tracker = null; S.deadlines = null; S.rootKids = null; S.folders = {}; S.cidx = null; S.corp = {}; S.hdr = {}; S.feedback = null; S.rulesIx = null;
+    S.tracker = null; S.deadlines = null; S.edits = null; S.rootKids = null; S.folders = {}; S.cidx = null; S.corp = {}; S.hdr = {}; S.feedback = null; S.rulesIx = null;
     await route();
     toast('Up to date');
   }
@@ -3068,7 +3453,10 @@
       catch (e) { closeSheet(); toast('Could not move it: ' + e.message); }
       return;
     }
+    if (act === 'tmine') { S.trackerMine = !S.trackerMine; route(); return; }
     if (act === 'tm') { location.hash = '#/tracker/' + encodeURIComponent(el.getAttribute('data-m')); return; }
+    if (act === 'gfx') { gfxAct(el); return; }
+    if (act === 'gfxundo') { gfxUndo(); return; }
     if (act === 'gm') { S.graphicsM = el.getAttribute('data-m'); route(); return; }
     if (act === 'dfilter') { S.deadlineFilter = el.getAttribute('data-k'); route(); return; }
     if (act === 'gexact') {
@@ -3079,6 +3467,9 @@
       if (guideMode().kind === 'doc') renderGuideResults(); else renderIndexResults();
       return;
     }
+    if (act === 'edch') { S.edAll = !S.edAll; S.limit = 25; renderEdits(); return; }
+    if (act === 'edm') { S.edM = el.getAttribute('data-m') || ''; S.limit = 25; renderEdits(); return; }
+    if (act === 'edmore') { S.limit = (S.limit || 25) + 50; renderEdits(); return; }
     if (act === 'gmode') { S.guideMode = el.getAttribute('data-k'); S.expanded = {}; S.limit = 25; route(); return; }
     if (act === 'cfilter') { S.cFilter = el.getAttribute('data-m'); S.expanded = {}; S.llimit = 6; route(); return; }
     if (act === 'expand') { S.expanded = S.expanded || {}; S.expanded[el.getAttribute('data-k')] = true; renderIndexResults(); return; }
@@ -3102,6 +3493,7 @@
   });
   document.addEventListener('change', async function (ev) {
     var el = ev.target, s = S.submit;
+    if (el.getAttribute && el.getAttribute('data-act') === 'deskwho') { S.deskWho = el.value || ''; route(); return; }
     if (el.id === 'sFile' && s) { s.file = el.files && el.files[0] || null; s.nameTouched = false; renderSubmit(); return; }
     var act = el.getAttribute && el.getAttribute('data-act');
     if (!s || !act) return;
