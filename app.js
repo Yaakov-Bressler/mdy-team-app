@@ -309,7 +309,7 @@
     try { localStorage.setItem('mdy-stars', JSON.stringify(s)); } catch (e) { /* ignore */ }
   }
   /* Which tracker rows a deadline covers, read from its Masechta, Amudim and "Done when" columns exactly as the site's
-     deadlines core reads them (Claude/Deadlines/deadlines-core.js, VERSION 2026-10-26-01), so "My work" and the site's tally
+     deadlines core reads them (Claude/Deadlines/deadlines-core.js, VERSION 2026-11-02-01), so "My work" and the site's tally
      agree. A Masechta can be a volume ("Meilah volume" = Meilah, Kinnim, Tamid, Middos) or a list ("Meilah, Kinnim");
      Amudim takes "all", ranges, "all except ...", and terms that name a masechta ("Meilah 2a-10a, Kinnim all"). */
   var DL_VOLUMES = { 'meilah volume': ['Meilah', 'Kinnim', 'Tamid', 'Middos'] };
@@ -321,6 +321,7 @@
     'Edited (first-round editing)': { New: 'Edited', Old: 'Edited' },
     'Mevukar (content editors)': { New: 'Mevukar', Old: 'Mevukar' },
     "Post Kramer (back from R' Kramer)": { New: 'Post Kramer', Old: 'Post Kramer' },
+    "Edited 2 (in R' Waldman's folder)": { New: 'Edited 2', Old: 'Edited 2' }, /* YB, 2 Nov 2026: R' Waldman's pass done, file in his folder */
     'Proofread': { New: 'Proofread', Old: 'Proofread' },
     'Final': { New: 'Final', Old: 'Closed' }
   };
