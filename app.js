@@ -414,22 +414,32 @@
     S.fromDl = {};
     if (!S.tracker || !S.deadlines) return;
     var test = who ? function (d) { return ownerKey(d) === who; } : deadlineIsMine;
-    S.deadlines.filter(function (d) { return (d.days == null || d.days >= 0) && test(d); }).forEach(function (d) {
+    /* overdue deadlines stay on the desk (YB, 2 Nov 2026): only amudim not yet at the deadline's stage come back, so a finished one adds nothing */
+    S.deadlines.filter(function (d) { return test(d); }).forEach(function (d) {
       dlRows(d, S.tracker).forEach(function (r) {
         /* an amud under two of your deadlines shows the earlier one */
         if (!S.fromDl[r.id] || (d.due && S.fromDl[r.id].due && d.due < S.fromDl[r.id].due)) S.fromDl[r.id] = d;
       });
     });
   }
-  /* an amud is on the desk now when it has reached the stage just before the one its deadline asks for (or later);
-     earlier than that, it is still coming */
+  /* an amud is on the desk now once it has reached the stage its deadline's work starts from (or later); earlier than that,
+     it is still coming. YB, 2 Nov 2026: a Mevukar deadline starts from Edited (not Reviewed); an Edited 2 deadline (the
+     "Post Kramer" choice on Kerisos, i.e. in R' Waldman's folder) starts from Kramer. Otherwise: the stage just before. */
+  var DESK_FROM = { 'Mevukar': 'Edited', 'Post Kramer': 'Kramer', 'Edited 2': 'Kramer' };
   function deskNow(r, want) {
     if (!want) return true;
     var L = stagesFor(r.masechta, r.workflow), si = L.indexOf(r.stage);
+    if (si < 0) return true;
+    var from = DESK_FROM[want];
+    if (from && L.indexOf(from) > -1) return si >= L.indexOf(from);
     var ti = want === 'Post Kramer' ? L.indexOf('Kramer') + 1 : L.indexOf(want);
-    if (ti < 0 || si < 0) return true;
+    if (ti < 0) return true;
     return si >= ti - 1;
   }
+  /* YB, 2 Nov 2026 (option b): once a deadline is close (DESK_ALL_DAYS days or fewer) or overdue, every amud on it still
+     to do is on the desk, whatever its stage; a deadline further off keeps the On your desk / Coming later split */
+  var DESK_ALL_DAYS = 3;
+  function dlClose(d) { return !!d && d.days != null && d.days <= DESK_ALL_DAYS; }
   function dlWant(d) { var t = DL_TARGETS[String((d && d.f && d.f.Target) || '').trim()]; return t ? t.New : null; }
   /* the deadline's whole tally, as the site counts it (a split amud's parts each weigh 1/n) */
   function dlTally(d, rows) {
@@ -2624,16 +2634,18 @@
     /* someone else's desk (picked below): only the amudim from his deadlines */
     var owners = {}, oorder = [], mk = (myTeam() || {}).key;
     dls.forEach(function (d) {
-      if (d.days == null || d.days < 0 || !DL_TARGETS[String((d.f || {}).Target || '').trim()]) return;
+      if (d.days == null || !DL_TARGETS[String((d.f || {}).Target || '').trim()]) return;
+      if (d.days < 0 && !dlRows(d, rows).length) return; /* overdue and finished: nothing on that desk */
       var k = ownerKey(d); if (!k || k === mk || owners[k]) return;
       owners[k] = ownerName(d); oorder.push(k);
     });
     var who = S.deskWho && owners[S.deskWho] ? S.deskWho : '';
     markFromDeadlines(who || null);
     var mine = who ? rows.filter(function (r) { return S.fromDl[r.id]; }) : rows.filter(isMine);
-    var now = mine.filter(function (r) { var d = S.fromDl[r.id]; return !d || isStarred(r.id) || deskNow(r, dlWant(d)); });
+    var now = mine.filter(function (r) { var d = S.fromDl[r.id]; return !d || isStarred(r.id) || dlClose(d) || deskNow(r, dlWant(d)); });
     var later = mine.filter(function (r) { return now.indexOf(r) < 0; });
-    var upcoming = dls.filter(function (d) { return d.days != null && d.days >= 0; });
+    /* the deadline card at the top: overdue ones that still have amudim to do come first (the list is sorted by due date) */
+    var upcoming = dls.filter(function (d) { return d.days != null && (d.days >= 0 || (DL_TARGETS[String((d.f || {}).Target || '').trim()] && dlRows(d, rows).length)); });
     var myNext = (who ? upcoming.filter(function (d) { return ownerKey(d) === who; })[0] : upcoming.filter(deadlineIsMine)[0]) || upcoming[0];
     frame({ title: 'My work', tab: 'home', refresh: true, kicker: (S.me && S.me.displayName) || 'MDY Aleh Zayis Team' });
     var h = '<div class="homegrid"><div class="hg-top">';
