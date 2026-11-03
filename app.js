@@ -309,21 +309,26 @@
     try { localStorage.setItem('mdy-stars', JSON.stringify(s)); } catch (e) { /* ignore */ }
   }
   /* Which tracker rows a deadline covers, read from its Masechta, Amudim and "Done when" columns exactly as the site's
-     deadlines core reads them (Claude/Deadlines/deadlines-core.js, VERSION 2026-11-02-01), so "My work" and the site's tally
+     deadlines core reads them (Claude/Deadlines/deadlines-core.js, VERSION 2026-11-03-01), so "My work" and the site's tally
      agree. A Masechta can be a volume ("Meilah volume" = Meilah, Kinnim, Tamid, Middos) or a list ("Meilah, Kinnim");
      Amudim takes "all", ranges, "all except ...", and terms that name a masechta ("Meilah 2a-10a, Kinnim all"). */
   var DL_VOLUMES = { 'meilah volume': ['Meilah', 'Kinnim', 'Tamid', 'Middos'] };
   var DL_STAGES = {
     New: ['Open', 'Generated', 'Edited', 'Reviewed', 'Mevukar', 'Kramer', 'Post Kramer', 'Edited 2', 'Edited 3', 'Review 2', 'Proofread', 'Check', 'Final'],
-    Old: ['Open', 'Written', 'Run', 'Edited', 'Mevukar', 'Kramer', 'Post Kramer', 'Edited 2', 'Mevukar 2', 'Proofread', 'Closed']
+    Old: ['Open', 'Written', 'Run', 'Edited', 'Mevukar', 'Kramer', 'Post Kramer', 'Edited 2', 'Mevukar 2', 'Proofread', 'Closed'],
+    /* Berachos (YB, 3 Nov 2026): its own nine stages; no Kramer and no Edited 2. Rows with Workflow 'Berachos' rank here */
+    Berachos: ['Open', 'Generated', 'Edited', 'Mevukar', 'Final Edited', 'AI Checked', 'AI Proofread', 'Proofread', 'Final']
   };
+  /* a "Done when" choice with no stage for a row's workflow (Post Kramer or Edited 2 on Berachos, Final Edited elsewhere)
+     does not apply to that row: it is left out of the deadline, never counted done (as the core, 3 Nov 2026) */
   var DL_TARGETS = {
-    'Edited (first-round editing)': { New: 'Edited', Old: 'Edited' },
-    'Mevukar (content editors)': { New: 'Mevukar', Old: 'Mevukar' },
+    'Edited (first-round editing)': { New: 'Edited', Old: 'Edited', Berachos: 'Edited' },
+    'Mevukar (content editors)': { New: 'Mevukar', Old: 'Mevukar', Berachos: 'Mevukar' },
+    'Final Edited (final editors)': { Berachos: 'Final Edited' },
     "Post Kramer (back from R' Kramer)": { New: 'Post Kramer', Old: 'Post Kramer' },
     "Edited 2 (in R' Waldman's folder)": { New: 'Edited 2', Old: 'Edited 2' }, /* YB, 2 Nov 2026: R' Waldman's pass done, file in his folder */
-    'Proofread': { New: 'Proofread', Old: 'Proofread' },
-    'Final': { New: 'Final', Old: 'Closed' }
+    'Proofread': { New: 'Proofread', Old: 'Proofread', Berachos: 'Proofread' },
+    'Final': { New: 'Final', Old: 'Closed', Berachos: 'Final' }
   };
   function dlMasechtos(m) {
     var t = String(m == null ? '' : m).trim();
@@ -334,7 +339,7 @@
     t.split(/\s*(?:[,;+&\/]|\band\b)\s*/i).forEach(function (x) { x = x.trim(); if (x && out.indexOf(x) < 0) out.push(x); });
     return out;
   }
-  function dlWf(w) { return w === 'Old' ? 'Old' : 'New'; }
+  function dlWf(w) { return w === 'Old' ? 'Old' : w === 'Berachos' ? 'Berachos' : 'New'; }
   function dlRank(stage, w) {
     if (stage === 'Final' || stage === 'Closed') return 999;
     return DL_STAGES[dlWf(w)].indexOf(stage);
@@ -401,7 +406,7 @@
       var a = dlAmud(r.title);
       if (!a) return false;
       if (!spec.inc.some(function (t) { return dlHit(t, a, mas); }) || spec.exc.some(function (t) { return dlHit(t, a, mas); })) return false;
-      if (stage) { var w = dlWf(r.workflow); if (dlRank(r.stage, w) >= dlRank(stage[w], w)) return false; }
+      if (stage) { var w = dlWf(r.workflow); if (!stage[w]) return false; if (dlRank(r.stage, w) >= dlRank(stage[w], w)) return false; }
       return true;
     });
   }
@@ -426,7 +431,7 @@
   /* an amud is on the desk now once it has reached the stage its deadline's work starts from (or later); earlier than that,
      it is still coming. YB, 2 Nov 2026: a Mevukar deadline starts from Edited (not Reviewed); an Edited 2 deadline (the
      "Post Kramer" choice on Kerisos, i.e. in R' Waldman's folder) starts from Kramer. Otherwise: the stage just before. */
-  var DESK_FROM = { 'Mevukar': 'Edited', 'Post Kramer': 'Kramer', 'Edited 2': 'Kramer' };
+  var DESK_FROM = { 'Mevukar': 'Edited', 'Post Kramer': 'Kramer', 'Edited 2': 'Kramer', 'Final Edited': 'Mevukar' };
   function deskNow(r, want) {
     if (!want) return true;
     var L = stagesFor(r.masechta, r.workflow), si = L.indexOf(r.stage);
@@ -441,7 +446,7 @@
      to do is on the desk, whatever its stage; a deadline further off keeps the On your desk / Coming later split */
   var DESK_ALL_DAYS = 3;
   function dlClose(d) { return !!d && d.days != null && d.days <= DESK_ALL_DAYS; }
-  function dlWant(d) { var t = DL_TARGETS[String((d && d.f && d.f.Target) || '').trim()]; return t ? t.New : null; }
+  function dlWant(d) { var t = DL_TARGETS[String((d && d.f && d.f.Target) || '').trim()]; return t ? (t.New || t.Berachos) : null; }
   /* The final editor's two areas (YB, 4 Nov 2026, as on the site's My Desk): "the final editor who's responsible for an amud should see
      one area with amudim that returned from kramer to edit and one from the proofreader to review. if the deadline is for final both
      should be included, if the deadline is for waldman (or final editing) the edit should have a deadline, and the review should appear
@@ -489,9 +494,10 @@
         var a = dlAmud(r.title);
         if (!a || !spec.inc.some(function (t) { return dlHit(t, a, mas); }) || spec.exc.some(function (t) { return dlHit(t, a, mas); })) return;
         var w = 1 / (parts[a.ord] || 1), wf = dlWf(r.workflow), have = dlRank(r.stage, wf);
+        if (!tg[wf]) return;   /* this choice has no stage for the row's workflow: not part of the tally */
         res.total += w;
         if (have > -1 && have >= dlRank(tg[wf], wf)) res.done += w;
-        else if (deskNow(r, tg.New)) res.ready += w; else res.wait += w;
+        else if (deskNow(r, tg[wf])) res.ready += w; else res.wait += w;
       });
     });
     ['total', 'done', 'ready', 'wait'].forEach(function (k) { res[k] = Math.round(res[k] * 100) / 100; });

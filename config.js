@@ -11,8 +11,8 @@ window.MDY_CONFIG = {
     deadlines: '97d2c140-5a78-45d6-aa0f-12751b213469',
     feedbackTitle: 'Team Feedback'
   },
-  masechtos: ['Kerisos', 'Meilah', 'Tamid', 'Middos', 'Kinnim', 'Temurah'],
-  prefixes: { Kerisos: 'KER', Meilah: 'MEI', Tamid: 'TAM', Middos: 'MID', Kinnim: 'KIN', Temurah: 'TEM' },
+  masechtos: ['Kerisos', 'Meilah', 'Tamid', 'Middos', 'Kinnim', 'Temurah', 'Berachos'],
+  prefixes: { Kerisos: 'KER', Meilah: 'MEI', Tamid: 'TAM', Middos: 'MID', Kinnim: 'KIN', Temurah: 'TEM', Berachos: 'BER' },
   resourcesFolder: 'Resources',
   siteAssetsDrive: 'b!-uVDfUf5LEeRULpN1gypU3ud3ezGcDxOi7ykzS1m9EU_rOsoceDARo88MgL_5cmC',
   contactsPage: 'Contacts.aspx',
@@ -21,7 +21,8 @@ window.MDY_CONFIG = {
   volumes: [
     { name: 'Kerisos', masechtos: ['Kerisos'], from: '' },
     { name: 'Meilah', masechtos: ['Meilah'], from: '2026-10-25' },
-    { name: 'Kinnim \u2013 Tamid \u2013 Middos', sub: 'Kinnim \u00b7 Tamid \u00b7 Middos', masechtos: ['Kinnim', 'Tamid', 'Middos'], from: '2026-10-25' }
+    { name: 'Kinnim \u2013 Tamid \u2013 Middos', sub: 'Kinnim \u00b7 Tamid \u00b7 Middos', masechtos: ['Kinnim', 'Tamid', 'Middos'], from: '2026-10-25' },
+    { name: 'Berachos', masechtos: ['Berachos'], from: '' }   /* Perek 4 first (go-live, YB) */
   ],
   /* Masechtos that run on their own, shorter list of stages instead of every choice on the tracker's Stage column.
      The Meilah volume has eight (YB, 26 Oct 2026).
@@ -32,7 +33,11 @@ window.MDY_CONFIG = {
     { name: 'Meilah volume', masechtos: ['Meilah', 'Kinnim', 'Tamid', 'Middos'],
       stages: ['Open', 'Generated', 'Edited', 'Mevukar', 'Kramer', 'Edited 2', 'Proofread', 'Final'] },
     { name: 'Kerisos', masechtos: ['Kerisos'],
-      stages: ['Open', 'Generated', 'Edited', 'Reviewed', 'Mevukar', 'Kramer', 'Edited 2', 'Proofread', 'Final'] }
+      stages: ['Open', 'Generated', 'Edited', 'Reviewed', 'Mevukar', 'Kramer', 'Edited 2', 'Proofread', 'Final'] },
+    /* Berachos (YB, 3 Nov 2026): no Kramer; final editing (R' Waldman, R' Bressler), then the final check (AI Checked)
+       and the AI proofread before the proofreader */
+    { name: 'Berachos', masechtos: ['Berachos'],
+      stages: ['Open', 'Generated', 'Edited', 'Mevukar', 'Final Edited', 'AI Checked', 'AI Proofread', 'Proofread', 'Final'] }
   ],
   /* A row still on a stage that has been taken off its workflow moves on to this one with Next / Submit (28 Oct 2026). */
   retiredNext: { 'Written': 'Edited', 'Run': 'Edited', 'Post Kramer': 'Edited 2', 'Edited 3': 'Proofread', 'Review 2': 'Proofread', 'Mevukar 2': 'Proofread', 'Check': 'Final', 'Closed': 'Final' },
@@ -81,6 +86,8 @@ window.MDY_CONFIG = {
     'Open': '#e74c3c', 'Generated': '#ffa040', 'Written': '#ffa040', 'Edited': '#8b6348',
     'Reviewed': '#9b4f96', 'Run': '#9b4f96', 'Edited 2': '#1a54a8', 'Mevukar': '#7b1fa2',
     'Kramer': '#607d8b', 'Post Kramer': '#00bcd4', 'Edited 3': '#e91e63', 'Review 2': '#f9e000',
-    'Mevukar 2': '#f9e000', 'Proofread': '#a9db5e', 'Check': '#00695c', 'Final': '#1db954', 'Closed': '#1db954'
+    'Mevukar 2': '#f9e000', 'Proofread': '#a9db5e', 'Check': '#00695c', 'Final': '#1db954', 'Closed': '#1db954',
+    /* Berachos stages, the same colours as its tab on the site's Amud Tracker */
+    'Final Edited': '#1a54a8', 'AI Checked': '#00bcd4', 'AI Proofread': '#607d8b'
   }
 };
