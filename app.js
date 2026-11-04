@@ -442,6 +442,37 @@
   var DESK_ALL_DAYS = 3;
   function dlClose(d) { return !!d && d.days != null && d.days <= DESK_ALL_DAYS; }
   function dlWant(d) { var t = DL_TARGETS[String((d && d.f && d.f.Target) || '').trim()]; return t ? t.New : null; }
+  /* The final editor's two areas (YB, 4 Nov 2026, as on the site's My Desk): "the final editor who's responsible for an amud should see
+     one area with amudim that returned from kramer to edit and one from the proofreader to review. if the deadline is for final both
+     should be included, if the deadline is for waldman (or final editing) the edit should have a deadline, and the review should appear
+     but with no deadline" ... "but only the amudim which are assigned to that editor should appear". His amudim are those of his own
+     deadlines whose "Done when" is Edited 2 or Final (finished deadlines too), until each is Final. */
+  var FE_EDIT = { 'Kramer': 1, 'Post Kramer': 1 }, FE_REV = { 'Proofread': 1, 'Check': 1 };
+  var FE_PROOF = { 'Edited 2': 1, 'Mevukar 2': 1, 'Edited 3': 1, 'Review 2': 1 }, FE_END = { 'Final': 1, 'Closed': 1 };
+  function dlIsFE(d) { var t = dlWant(d); return t === 'Final' || t === 'Edited 2'; }
+  function finalAreas(dls, rows, test) {
+    var A = { edit: { now: [], later: [] }, rev: { now: [], later: [] }, seen: {}, ids: {} };
+    function put(box, r, due) {
+      var k = r.id, had = A.seen[k];
+      if (!had) { had = A.seen[k] = { r: r, dl: due }; box.push(had); A.ids[k] = 1; }
+      else if (due && (!had.dl || String(due.due || '9') < String(had.dl.due || '9'))) had.dl = due;
+    }
+    dls.filter(function (d) { return dlIsFE(d) && test(d); }).forEach(function (d) {
+      var asFinal = { f: Object.assign({}, d.f || {}, { Target: 'Final' }), title: d.title, lines: d.lines || [] };
+      var owed = {}; dlRows(d, rows).forEach(function (r) { owed[r.id] = 1; });
+      var isFinal = dlWant(d) === 'Final';
+      dlRows(asFinal, rows).forEach(function (r) {
+        if (FE_END[r.stage]) return;
+        var due = owed[r.id] && d.due ? d : null;
+        if (FE_EDIT[r.stage]) put(A.edit.now, r, due);
+        else if (FE_REV[r.stage]) put(A.rev.now, r, isFinal ? due : null);
+        else if (FE_PROOF[r.stage]) put(A.rev.later, r, isFinal ? due : null);
+        else if (due) put(A.edit.later, r, due);
+      });
+    });
+    return A;
+  }
+  function feLine(it) { return it.dl ? 'Due ' + fmtDate(it.dl.due) + ' · ' + it.dl.title : 'No deadline'; }
   /* the deadline's whole tally, as the site counts it (a split amud's parts each weigh 1/n) */
   function dlTally(d, rows) {
     var f = d.f || {}, target = String(f.Target || '').trim(), tg = DL_TARGETS[target];
@@ -2642,7 +2673,8 @@
     });
     var who = S.deskWho && owners[S.deskWho] ? S.deskWho : '';
     markFromDeadlines(who || null);
-    var mine = who ? rows.filter(function (r) { return S.fromDl[r.id]; }) : rows.filter(isMine);
+    var fa = finalAreas(dls, rows, who ? function (d) { return ownerKey(d) === who; } : deadlineIsMine);
+    var mine = (who ? rows.filter(function (r) { return S.fromDl[r.id]; }) : rows.filter(isMine)).filter(function (r) { return !fa.ids[r.id]; });
     var now = mine.filter(function (r) { var d = S.fromDl[r.id]; return !d || isStarred(r.id) || dlClose(d) || deskNow(r, dlWant(d)); });
     var later = mine.filter(function (r) { return now.indexOf(r) < 0; });
     /* the deadline card at the top: overdue ones that still have amudim to do come first (the list is sorted by due date) */
@@ -2653,11 +2685,26 @@
     if (myNext) h += '<a class="card dl" href="#/deadlines" style="text-decoration:none">' + deadlineCard(myNext).replace(/^<article class="card dl">|<\/article>$/g, '') + '</a>';
     h += '<a class="btn block" href="#/submit">' + ICON.up + 'Submit work</a></div><div class="hg-list">';
     var long = now.filter(function (r) { var d = daysIn(r); return d !== null && d >= (C.stale || { warn: 7 }).warn; }).length;
-    h += '<h2 class="sec">' + (who ? esc(owners[who]) + '’s desk' : 'On your desk') + ' <small>' + now.length + '</small>' + (long ? ' <i class="indays warn">' + long + ' a week or more</i>' : '') + '</h2>';
+    var feAny = fa.edit.now.length + fa.edit.later.length + fa.rev.now.length + fa.rev.later.length;
+    h += '<h2 class="sec">' + (who ? esc(owners[who]) + '’s desk' : 'On your desk') + ' <small>' + (now.length + fa.edit.now.length + fa.rev.now.length) + '</small>' + (long ? ' <i class="indays warn">' + long + ' a week or more</i>' : '') + '</h2>';
     if (oorder.length) h += '<label class="deskwho">Show <select data-act="deskwho"><option value="">Me</option>' + oorder.map(function (k) {
       return '<option value="' + esc(k) + '"' + (k === who ? ' selected' : '') + '>' + esc(owners[k]) + '</option>';
     }).join('') + '</select></label>';
+    if (feAny) {
+      var feSec = function (title, box, emptyText, laterText) {
+        if (!box.now.length && !box.later.length) return '';
+        var x = '<h2 class="sec">' + title + ' <small>' + box.now.length + '</small></h2>';
+        x += box.now.length ? '<div class="rows">' + box.now.map(function (it) { return rowHtml(it.r, 0, feLine(it)); }).join('') + '</div>' : '<div class="card empty">' + emptyText + '</div>';
+        if (box.later.length) x += '<details class="card later"><summary>Coming later (' + box.later.length + ', ' + laterText + ')</summary><div class="rows">' +
+          box.later.map(function (it) { return rowHtml(it.r, 0, feLine(it)); }).join('') + '</div></details>';
+        return x;
+      };
+      h += feSec('To edit · back from R’ Kramer', fa.edit, 'Nothing back from R’ Kramer yet.', 'still before R’ Kramer');
+      h += feSec('To review · back from the proofreader', fa.rev, 'Nothing back from the proofreader yet.', 'with the proofreader now');
+      if (now.length || later.length) h += '<h2 class="sec">Your other deadlines <small>' + now.length + '</small></h2>';
+    }
     if (now.length) h += '<div class="rows">' + now.map(rowHtml).join('') + '</div>';
+    else if (feAny) { if (later.length) h += '<div class="card empty">Nothing else has reached ' + (who ? 'this' : 'your') + ' desk yet.</div>'; }
     else if (!later.length) h += '<div class="card empty">' + (who ? 'Nothing on this desk from the Deadlines list.' : 'Nothing is under your name yet. Tap the star on any amud in the Tracker to keep it here.') + '</div>';
     else h += '<div class="card empty">Nothing has reached ' + (who ? 'this' : 'your') + ' desk yet.</div>';
     if (later.length) h += '<details class="card later"><summary>Coming later (' + later.length + ', still at earlier stages)</summary><div class="rows">' + later.map(rowHtml).join('') + '</div></details>';
@@ -2670,11 +2717,12 @@
       '<a href="' + esc(C.chatUrl) + '" target="_blank" rel="noopener">' + ICON.chat + '<span class="grow">Team chat</span>' + ICON.ext + '</a></div></div></div>';
     setView(h);
   }
-  function rowHtml(r) {
+  function rowHtml(r, i, line) {
     var c = stageColor(r.stage);
+    if (typeof line !== 'string') line = null;
     return '<div class="row" style="border-left-color:' + c + '">' +
       '<button class="star" data-act="star" data-id="' + esc(r.id) + '" aria-pressed="' + isStarred(r.id) + '" aria-label="Keep ' + esc(r.title) + ' in My work">' + ICON.star + '</button>' +
-      '<div class="rt"><b><a class="openf" href="' + esc(openAmudUrl(r)) + '" target="_blank" rel="noopener" title="Open the latest file">' + esc(r.title) + '</a></b><span>' + daysChip(r) + esc(personLine(r) || r.notes || '') + '</span></div>' +
+      '<div class="rt"><b><a class="openf" href="' + esc(openAmudUrl(r)) + '" target="_blank" rel="noopener" title="Open the latest file">' + esc(r.title) + '</a></b><span>' + daysChip(r) + esc(line != null ? line : (personLine(r) || r.notes || '')) + '</span></div>' +
       '<button class="chipbtn" style="border:none;padding:0;background:transparent" data-act="move" data-id="' + esc(r.id) + '" aria-label="Move ' + esc(r.title) + ', now ' + esc(r.stage) + '">' + stageChip(r.stage) + '</button>' +
       '<a class="star" href="#/submit/' + esc(r.id) + '" aria-label="Submit work for ' + esc(r.title) + '" style="color:var(--navy)"><svg viewBox="0 0 24 24" aria-hidden="true" style="fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round"><path d="M12 16V5M6.5 10.5L12 5l5.5 5.5M5 20h14"/></svg></a>' +
       '</div>';
@@ -2791,7 +2839,7 @@
     if (!s || (rowId && s.rowId !== rowId) || s.sent) {
       var mine = rows.filter(isMine);
       var row0 = rows.filter(function (r) { return r.id === rowId; })[0] || mine[0] || null;
-      s = S.submit = { rowId: row0 ? row0.id : null, showAll: !!(row0 && !isMine(row0)), stage: row0 ? nextStage(row0.stage, row0.masechta, row0.workflow) : '', file: null, name: '', nameTouched: false, role: 'Editors', person: null, note: '', sent: false, busy: false };
+      s = S.submit = { rowId: row0 ? row0.id : null, showAll: !!(row0 && !isMine(row0)), stage: row0 ? nextStage(row0.stage, row0.masechta, row0.workflow) : '', file: null, name: '', nameTouched: false, role: 'Editors', roleTouched: false, person: null, note: '', sent: false, busy: false };
     }
     await renderSubmit();
   }
@@ -2822,12 +2870,23 @@
         if (!mf) folderHtml = '<div class="err">No folder for ' + esc(row.masechta) + ' in the library.</div>';
         else {
           var roles = (await kids(mf.id)).filter(function (x) { return x.folder; });
+          /* the folder for the stage being handed in, as on the site's My Desk (YB, 4 Nov 2026): Mevukar -> Mevakrim, Proofread ->
+             Proofreading, Final -> Final; Edited 2, the final editor's pass ("rabbi waldmans proofreading folder is final editing. it will
+             be more organized for berachos") -> Final Editing where the masechta has one (Berachos onward), otherwise Proofreading
+             (your folder there, or R' Waldman's) */
+          if (!s.roleTouched) {
+            var want = { 'Mevukar': 'Mevakrim', 'Proofread': 'Proofreading', 'Final': 'Final' }[s.stage] || 'Editors';
+            if (s.stage === 'Edited 2') want = roles.some(function (x) { return /^final editing$/i.test(x.name); }) ? 'Final Editing' : 'Proofreading';
+            var hit = roles.filter(function (x) { return x.name.toLowerCase() === want.toLowerCase(); })[0];
+            if (hit && hit.name !== s.role) { s.role = hit.name; s.person = null; }
+          }
           if (!roles.some(function (x) { return x.name === s.role; })) s.role = (roles.filter(function (x) { return /editor/i.test(x.name); })[0] || roles[0] || {}).name;
           var roleF = roles.filter(function (x) { return x.name === s.role; })[0];
           var people = roleF ? (await kids(roleF.id)).filter(function (x) { return x.folder; }) : [];
           if (!s.person || !people.some(function (p) { return p.id === s.person; })) {
             var sn = surname();
             var auto = sn ? people.filter(function (p) { return p.name.toLowerCase().indexOf(sn) > -1; })[0] : null;
+            if (!auto && s.stage === 'Edited 2' && /^proofreading$/i.test(s.role || '')) auto = people.filter(function (p) { return /waldman/i.test(p.name); })[0] || null;
             s.person = auto ? auto.id : '';
           }
           var personF = people.filter(function (p) { return p.id === s.person; })[0];
@@ -3516,10 +3575,10 @@
     if (el.id === 'sFile' && s) { s.file = el.files && el.files[0] || null; s.nameTouched = false; renderSubmit(); return; }
     var act = el.getAttribute && el.getAttribute('data-act');
     if (!s || !act) return;
-    if (act === 'samud') { s.rowId = el.value || null; var r = (S.tracker || []).filter(function (x) { return x.id === s.rowId; })[0]; s.stage = r ? nextStage(r.stage, r.masechta, r.workflow) : ''; s.nameTouched = false; s.person = null; renderSubmit(); }
+    if (act === 'samud') { s.rowId = el.value || null; var r = (S.tracker || []).filter(function (x) { return x.id === s.rowId; })[0]; s.stage = r ? nextStage(r.stage, r.masechta, r.workflow) : ''; s.nameTouched = false; s.roleTouched = false; s.person = null; renderSubmit(); }
     else if (act === 'sall') { s.showAll = el.checked; renderSubmit(); }
-    else if (act === 'sstage') { s.stage = el.value; renderSubmit(); }
-    else if (act === 'srole') { s.role = el.value; s.person = null; renderSubmit(); }
+    else if (act === 'sstage') { s.stage = el.value; if (!s.roleTouched) s.person = null; renderSubmit(); }
+    else if (act === 'srole') { s.role = el.value; s.roleTouched = true; s.person = null; renderSubmit(); }
     else if (act === 'sperson') { s.person = el.value; renderSubmit(); }
   });
   document.addEventListener('input', function (ev) {
