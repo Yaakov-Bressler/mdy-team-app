@@ -2761,10 +2761,16 @@
   function closeSheet() { var w = $('#sheet'); w.hidden = true; w.innerHTML = ''; w._row = null; }
 
   /* --- Submit --- */
-  function suggestName(row, file) {
+  /* a hand-in to Final is named as the Finals are, by the masechta folder's job code: "AZ-26875 2a.docx", part digit kept, no zero, no initials (YB, 3-4 Nov 2026) */
+  var JOB = { Kerisos: 'AZ-26875', Temurah: 'AZ-26455', Meilah: 'AZ-27102', Kinnim: 'AZ-27102', Tamid: 'AZ-27102', Middos: 'AZ-27102', Berachos: 'AZ-27082' };
+  function suggestName(row, file, stage) {
     var ini = initials();
     var base = file ? file.name.replace(/\.[^.]+$/, '') : '';
     var ext = file && /\.[^.]+$/.test(file.name) ? file.name.match(/\.[^.]+$/)[0] : '.docx';
+    if (stage === 'Final' && JOB[row.masechta]) {
+      var fm = /(\d+)\s*([ab])\s*(?:\((\d)\))?/i.exec(row.title);
+      if (fm) return JOB[row.masechta] + ' ' + parseInt(fm[1], 10) + fm[2].toLowerCase() + (fm[3] || '') + ext;
+    }
     if (base && /^[A-Z]{3}\d{1,3}[ab]\d?(_[A-Za-z]{1,4})*$/i.test(base)) {
       var parts = base.split('_');
       if (parts[parts.length - 1].toUpperCase() !== ini) base = base + '_' + ini;
@@ -2835,7 +2841,7 @@
         }
       } catch (e) { folderHtml = errBox(e); }
     }
-    if (row && !s.nameTouched) s.name = suggestName(row, s.file);
+    if (row && !s.nameTouched) s.name = suggestName(row, s.file, s.stage);
     var stages = row ? stagesFor(row.masechta, row.workflow) : (S.stages || []);
     var ready = row && s.file && s.name && s.parentId && !s.busy;
     var h = '<section class="field"><label class="lbl" for="sAmud">1. Which amud?</label><select id="sAmud" data-act="samud">' + opts + '</select>' +
