@@ -482,6 +482,51 @@
     });
     return A;
   }
+  /* Mrs. Mayer's proofreading desk, as the site's My Desk reads it (YB, 4-5 Nov 2026). She has no deadline. An amud at Edited 2
+     (Berachos: Final Edited, AI Checked or AI Proofread) is on her desk once Claude's proofreading pass is in
+     <masechta>/Proofreading/Claude; until then it, and amudim at Kramer, are coming later. */
+  var PROOF_B = { 'Final Edited': 1, 'AI Checked': 1, 'AI Proofread': 1 };
+  function proofStageWaiting(r) { return r.masechta === 'Berachos' ? !!PROOF_B[r.stage] : (r.stage === 'Edited 2' || r.stage === 'Kramer'); }
+  function proofWaiting(rows) { return rows.some(proofStageWaiting); }
+  var RE_DAF = /(?:^|[^0-9])(\d{1,3})([ab])(?=$|[^a-z]|part|ii?(?:[^a-z]|$))/i;
+  function parseAmudName(name) { /* the same reading of a file name as the site's Amud History and My Desk */
+    var stem = String(name).replace(/\.[^.]+$/, ''), m = RE_DAF.exec(stem);
+    if (!m) return null;
+    var daf = parseInt(m[1], 10); if (daf < 2 || daf > 200) return null;
+    var rest = stem.slice(m.index + m[0].length), part = null, p;
+    if ((p = /^(\d)(?!\d)/.exec(rest))) part = +p[1];
+    else if (/^ii(?![a-z])/i.test(rest)) part = 2;
+    else if ((p = /part[ _]?(\d|ii?(?![a-z]))/i.exec(rest))) part = /^i+$/i.test(p[1]) ? p[1].length : +p[1];
+    else if ((p = /^[ _]+(\d)(?=[ _]|$)/.exec(rest))) part = +p[1];
+    else if ((p = /_p(\d)(?![a-z0-9])/i.exec(rest))) part = +p[1];
+    else if (/from[ _]mishnah/i.test(rest)) part = 2;
+    if (part !== null && (part < 1 || part > 3)) part = null;
+    return { daf: daf, side: m[2].toLowerCase(), part: part };
+  }
+  async function proofDeskRows(rows) {
+    var out = { now: [], later: [], line: {} }, ms = {}, ai = {};
+    rows.forEach(function (r) { if (proofStageWaiting(r) && r.stage !== 'Kramer' && r.masechta) ms[r.masechta] = 1; });
+    await Promise.all(Object.keys(ms).map(async function (m) {
+      try {
+        var cl = await subFolder(await subFolder(await masechtaFolder(m), 'Proofreading'), 'Claude');
+        ai[m] = cl ? (await kids(cl.id)).filter(function (x) { return x.file && /\.docx$/i.test(x.name) && !/^~/.test(x.name); })
+          .map(function (x) { return parseAmudName(x.name); }).filter(Boolean) : [];
+      } catch (e) { ai[m] = []; }
+    }));
+    function aiDone(r) {
+      var m = /^\s*(.+?)\s+0*(\d{1,3})([ab])(?:\s*\(\s*(\d)\s*\))?\s*$/i.exec(r.title || '');
+      if (!m) return false;
+      var daf = +m[2], side = m[3].toLowerCase(), part = m[4] ? +m[4] : null;
+      return (ai[r.masechta] || []).some(function (p) { return p.daf === daf && p.side === side && (!part || !p.part || p.part === part); });
+    }
+    rows.forEach(function (r) {
+      if (!proofStageWaiting(r)) return;
+      var ready = r.stage !== 'Kramer' && (aiDone(r) || r.stage === 'AI Proofread');
+      if (ready) { out.now.push(r); out.line[r.id] = 'Claude’s proofreading pass is in Proofreading › Claude'; }
+      else { out.later.push(r); out.line[r.id] = r.stage === 'Kramer' ? 'With R’ Kramer' : 'Waiting for Claude’s proofreading pass'; }
+    });
+    return out;
+  }
   function feLine(it) { return it.dl ? 'Due ' + fmtDate(it.dl.due) + ' · ' + it.dl.title : 'No deadline'; }
   /* the deadline's whole tally, as the site counts it (a split amud's parts each weigh 1/n) */
   function dlTally(d, rows) {
@@ -553,7 +598,7 @@
   }
   function personLine(r) {
     var bits = [];
-    if (S.fromDl && S.fromDl[r.id] && !isStarred(r.id)) bits.push('Your deadline: ' + fmtDate(S.fromDl[r.id].due));
+    if (S.fromDl && S.fromDl[r.id] && !isStarred(r.id)) bits.push('Your deadline: ' + (fmtDate(S.fromDl[r.id].due) || 'no due date'));
     if (r.editor) bits.push('Editor: ' + r.editor);
     else if (r.writer) bits.push('Writer: ' + r.writer);
     if (r.workflow) bits.push(r.workflow + ' workflow');
@@ -699,7 +744,7 @@
       other.map(function (l) { return '<span class="clamp">' + esc(l.value) + '</span>'; }).join('') +
       (facts.length ? '<span style="display:flex;gap:6px;flex-wrap:wrap;margin-top:2px">' + facts.join('') + '</span>' : '') +
       (pc && pc.label !== 'Done' ? paceHtml(d, pc, false) : '') +
-      '<span style="color:var(--muted)">' + esc(fmtDate(d.due)) + heb.map(function (l) { return ' · <span lang="he" dir="rtl">' + esc(l.value) + '</span>'; }).join('') + '</span>' +
+      '<span style="color:var(--muted)">' + esc(fmtDate(d.due) || 'No due date') + heb.map(function (l) { return ' · <span lang="he" dir="rtl">' + esc(l.value) + '</span>'; }).join('') + '</span>' +
       '</div></article>';
   }
 
@@ -2680,20 +2725,34 @@
     /* someone else's desk (picked below): only the amudim from his deadlines */
     var owners = {}, oorder = [], mk = (myTeam() || {}).key;
     dls.forEach(function (d) {
-      if (d.days == null || !DL_TARGETS[String((d.f || {}).Target || '').trim()]) return;
-      if (d.days < 0 && !dlRows(d, rows).length) return; /* overdue and finished: nothing on that desk */
+      if (!DL_TARGETS[String((d.f || {}).Target || '').trim()]) return;
+      /* overdue, or with no due date (YB, 5 Nov 2026: an open-ended one such as R' Spetner's Middos counts too), and finished: nothing on that desk */
+      if ((d.days == null || d.days < 0) && !dlRows(d, rows).length) return;
       var k = ownerKey(d); if (!k || k === mk || owners[k]) return;
       owners[k] = ownerName(d); oorder.push(k);
     });
+    /* Mrs. Mayer has no deadline: her desk is read from the tracker, as on the site's My Desk (YB, 4-5 Nov 2026) */
+    if (mk !== 'mayer' && !owners.mayer && proofWaiting(rows)) { var pmT = (C.team || []).filter(function (t) { return t.key === 'mayer'; })[0]; if (pmT) { owners.mayer = pmT.name; oorder.push('mayer'); } }
     var who = S.deskWho && owners[S.deskWho] ? S.deskWho : '';
+    var proofDesk = who === 'mayer' || (!who && mk === 'mayer');
+    var pd = proofDesk ? await proofDeskRows(rows) : null;
     markFromDeadlines(who || null);
     var fa = finalAreas(dls, rows, who ? function (d) { return ownerKey(d) === who; } : deadlineIsMine);
     var mine = (who ? rows.filter(function (r) { return S.fromDl[r.id]; }) : rows.filter(isMine)).filter(function (r) { return !fa.ids[r.id]; });
     var now = mine.filter(function (r) { var d = S.fromDl[r.id]; return !d || isStarred(r.id) || dlClose(d) || deskNow(r, dlWant(d)); });
     var later = mine.filter(function (r) { return now.indexOf(r) < 0; });
+    if (pd) {
+      var seenP = {}; mine.forEach(function (r) { seenP[r.id] = 1; });
+      pd.now.forEach(function (r) { if (!seenP[r.id]) { now.push(r); mine.push(r); } });
+      pd.later.forEach(function (r) { if (!seenP[r.id]) { later.push(r); mine.push(r); } });
+    }
     /* the deadline card at the top: overdue ones that still have amudim to do come first (the list is sorted by due date) */
-    var upcoming = dls.filter(function (d) { return d.days != null && (d.days >= 0 || (DL_TARGETS[String((d.f || {}).Target || '').trim()] && dlRows(d, rows).length)); });
-    var myNext = (who ? upcoming.filter(function (d) { return ownerKey(d) === who; })[0] : upcoming.filter(deadlineIsMine)[0]) || upcoming[0];
+    var upcoming = dls.filter(function (d) {
+      var tg = DL_TARGETS[String((d.f || {}).Target || '').trim()];
+      if (d.days == null) return !!(tg && dlRows(d, rows).length); /* no due date: while it has amudim to do (5 Nov 2026) */
+      return d.days >= 0 || (tg && dlRows(d, rows).length);
+    });
+    var myNext = (who ? upcoming.filter(function (d) { return ownerKey(d) === who; })[0] : upcoming.filter(deadlineIsMine)[0]) || (proofDesk ? null : upcoming[0]);
     frame({ title: 'My work', tab: 'home', refresh: true, kicker: (S.me && S.me.displayName) || 'MDY Aleh Zayis Team' });
     var h = '<div class="homegrid"><div class="hg-top">';
     if (myNext) h += '<a class="card dl" href="#/deadlines" style="text-decoration:none">' + deadlineCard(myNext).replace(/^<article class="card dl">|<\/article>$/g, '') + '</a>';
@@ -2718,12 +2777,14 @@
       h += feSec('To review · back from the proofreader', fa.rev, 'Nothing back from the proofreader yet.', 'with the proofreader now');
       if (now.length || later.length) h += '<h2 class="sec">Your other deadlines <small>' + now.length + '</small></h2>';
     }
-    if (now.length) h += '<div class="rows">' + now.map(rowHtml).join('') + '</div>';
+    var pLine = function (r) { return pd && pd.line[r.id] ? rowHtml(r, 0, pd.line[r.id]) : rowHtml(r); };
+    if (now.length) h += '<div class="rows">' + now.map(pLine).join('') + '</div>';
     else if (feAny) { if (later.length) h += '<div class="card empty">Nothing else has reached ' + (who ? 'this' : 'your') + ' desk yet.</div>'; }
     else if (!later.length) h += '<div class="card empty">' + (who ? 'Nothing on this desk from the Deadlines list.' : 'Nothing is under your name yet. Tap the star on any amud in the Tracker to keep it here.') + '</div>';
     else h += '<div class="card empty">Nothing has reached ' + (who ? 'this' : 'your') + ' desk yet.</div>';
-    if (later.length) h += '<details class="card later"><summary>Coming later (' + later.length + ', still at earlier stages)</summary><div class="rows">' + later.map(rowHtml).join('') + '</div></details>';
-    if (mine.length) h += '<p class="note">Amudim from ' + (who ? 'his' : 'your') + ' deadlines that haven’t reached the deadline’s stage' + (who ? '' : ', plus any you’ve starred') + '. The grey tag is how long an amud has been in its stage; amber after a week, red after two. Tap a name to open its latest file.</p>';
+    if (later.length) h += '<details class="card later"><summary>Coming later (' + later.length + ', still at earlier stages)</summary><div class="rows">' + later.map(pLine).join('') + '</div></details>';
+    if (pd && (pd.now.length || pd.later.length)) h += '<p class="note">Proofreading: an amud is on this desk once Claude’s proofreading pass is in the masechta’s Proofreading › Claude folder. Hand in to Proofreading › Proofreader.</p>';
+    else if (mine.length) h += '<p class="note">Amudim from ' + (who ? 'his' : 'your') + ' deadlines that haven’t reached the deadline’s stage' + (who ? '' : ', plus any you’ve starred') + '. The grey tag is how long an amud has been in its stage; amber after a week, red after two. Tap a name to open its latest file.</p>';
     h += '</div><div class="hg-links"><h2 class="sec">Quick links</h2><div class="card pad0 navlist">' +
       '<a href="#/guide">' + ICON.pen.replace('M4 20l1-4L16 5a2.1 2.1 0 0 1 3 3L8 19z', 'M11 4.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zM16 16l4.5 4.5') + '<span class="grow">Look-ups, phrases and headers</span>' + ICON.chev + '</a>' +
       '<a href="#/ask">' + ICON.ask + '<span class="grow">Ask Chaim Levy</span><span class="aside">AI assistant</span>' + ICON.chev + '</a>' +
