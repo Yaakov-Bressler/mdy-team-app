@@ -559,8 +559,11 @@
     if (r.workflow) bits.push(r.workflow + ' workflow');
     return bits.join(' · ');
   }
+  /* AI Checked and AI Proofread never move the tracker (YB, 5 Nov 2026: "AI checked and AI proofread do not move the tracker, but they
+     send emails"): a Berachos amud waits at Final Edited until Mrs. Mayer's proofread, so the next stage after Final Edited is Proofread */
+  var UNSET_STAGES = { 'AI Checked': 1, 'AI Proofread': 1 };
   function nextStage(s, m, rowWf) {
-    var list = stagesFor(m, rowWf);
+    var list = stagesFor(m, rowWf).filter(function (x) { return !UNSET_STAGES[x] || x === s; });
     var i = list.indexOf(s);
     if (i < 0 && C.retiredNext && list.indexOf(C.retiredNext[s]) > -1) return C.retiredNext[s];
     return i > -1 && i < list.length - 1 ? list[i + 1] : s;
