@@ -72,6 +72,7 @@
     back: '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" style="fill:none;stroke:currentColor;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round"><path d="M15 6l-6 6 6 6"/></svg>',
     up: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V5M6.5 10.5L12 5l5.5 5.5M5 20h14"/></svg>',
     tick: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
+    up: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V5M6.5 10.5L12 5l5.5 5.5M5 20h14"/></svg>',
     cal: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg>',
     pic: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><circle cx="9" cy="10" r="1.8"/><path d="M20.5 16l-5-5-8 8.5"/></svg>',
     pen: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20l1-4L16 5a2.1 2.1 0 0 1 3 3L8 19z"/></svg>',
@@ -3245,6 +3246,7 @@
       '<nav class="card pad0 navlist" aria-label="More pages">' +
       '<a href="#/ask">' + ICON.ask + '<span class="grow">Ask Chaim Levy</span><span class="aside">AI assistant</span>' + ICON.chev + '</a>' +
       '<a href="#/deadlines">' + ICON.cal + '<span class="grow">Deadlines</span>' + ICON.chev + '</a>' +
+      '<a href="#/recent">' + ICON.up + '<span class="grow">Recent uploads</span><span class="aside">newest 15</span>' + ICON.chev + '</a>' +
       '<a href="#/graphics">' + ICON.pic + '<span class="grow">Graphics</span>' + ICON.chev + '</a>' +
       '<a href="#/files">' + ICON.folder + '<span class="grow">Files</span><span class="aside">the team library</span>' + ICON.chev + '</a>' +
       '<a href="#/feedback">' + ICON.pen + '<span class="grow">Feedback</span>' + ICON.chev + '</a>' +
@@ -3499,6 +3501,81 @@
     } catch (e) { fail(e, runFileSearch); }
   }
 
+  /* ---------- Recent uploads (YB, 5 Nov 2026: the site's Recent Uploads page, in the app) ----------
+     The 15 newest amud files in a masechta's stage folders (Writers, Editors, Mevakrim, Proofreading, Final), newest first,
+     the same list as SitePages/Recent-Uploads.aspx (mdy-recent.js). Microsoft Search through Graph, as the signed-in
+     person, by Created; never Claude/, Archive/, Resources/ or Graphics. Search lags a few minutes behind an upload. */
+  var RU_SHOW = 15;
+  var RU_STAGES = {
+    Writers: { c: '#ffa040', dark: true }, Editors: { c: '#8b6348' }, Mevakrim: { c: '#7b1fa2' },
+    Proofreading: { c: '#a9db5e', dark: true }, Final: { c: '#1db954' }
+  };
+  var RU_SKIP = ['claude', 'archive', 'resources'];
+  var RU_WHO = { 'SharePoint App': 'Claude' };
+  var ruTimer = null;
+  function ruAgo(d) {
+    var s = Math.max(0, (Date.now() - d.getTime()) / 1000);
+    if (s < 90) return 'just now';
+    var m = Math.round(s / 60); if (m < 60) return m + ' min ago';
+    var h = Math.round(m / 60); if (h < 24) return h + (h === 1 ? ' hour ago' : ' hours ago');
+    var dd = Math.round(h / 24); return dd + (dd === 1 ? ' day ago' : ' days ago');
+  }
+  async function loadRecent() {
+    var lib = C.siteUrl + '/Shared Documents';
+    var kql = 'path:"' + lib + '" FileExtension:docx' + RU_SKIP.map(function (f) { return ' -path:"' + lib + '/' + f.charAt(0).toUpperCase() + f.slice(1) + '"'; }).join('');
+    var req = { entityTypes: ['driveItem'], query: { queryString: kql }, from: 0, size: 100, sortProperties: [{ name: 'createdDateTime', isDescending: true }] };
+    var r;
+    try { r = await g('/search/query', { method: 'POST', body: { requests: [req] } }); }
+    catch (e) { if (e.status !== 400) throw e; delete req.sortProperties; req.size = 500; r = await g('/search/query', { method: 'POST', body: { requests: [req] } }); }
+    var hits = [];
+    ((r && r.value) || []).forEach(function (v) { (v.hitsContainers || []).forEach(function (hc) { hits = hits.concat(hc.hits || []); }); });
+    var out = [];
+    hits.forEach(function (h) {
+      var x = h.resource || {};
+      if (!x.webUrl || !x.createdDateTime) return;
+      var path; try { path = decodeURIComponent(x.webUrl.split('?')[0]); } catch (e) { path = x.webUrl; }
+      var at = path.indexOf('/Shared Documents/'); if (at < 0) return;
+      var parts = path.slice(at + 18).split('/');
+      if (parts.length < 3 || RU_SKIP.indexOf(parts[0].toLowerCase()) > -1 || !RU_STAGES[parts[1]]) return;
+      if (parts.slice(2).some(function (p) { return /^graphics$/i.test(p); })) return;
+      var by = (x.createdBy && x.createdBy.user && x.createdBy.user.displayName) || '';
+      out.push({ url: x.webUrl, name: x.name || parts[parts.length - 1], masechta: parts[0].replace(/\s*\(AZ-\d+\)\s*$/, ''),
+        stage: parts[1], desk: parts.slice(2, -1).join(' › '), by: RU_WHO[by] || by || '—', at: new Date(x.createdDateTime) });
+    });
+    out.sort(function (a, b) { return b.at - a.at; });
+    return out.slice(0, RU_SHOW);
+  }
+  function ruCard(it, i) {
+    var st = RU_STAGES[it.stage];
+    var href = it.url + (it.url.indexOf('?') < 0 ? '?web=1' : '&web=1');
+    var day = new Intl.DateTimeFormat('en-GB', { timeZone: C.timeZone, weekday: 'short', day: 'numeric', month: 'short' }).format(it.at);
+    var tm = new Intl.DateTimeFormat('en-GB', { timeZone: C.timeZone, hour: '2-digit', minute: '2-digit', hour12: false }).format(it.at);
+    return '<a class="card ru" style="border-left-color:' + st.c + '" href="' + esc(href) + '" target="_blank" rel="noopener" title="Open in Word">' +
+      '<span class="ru-no">' + (i + 1) + '</span><span class="grow" style="min-width:0">' +
+      '<span class="ru-name">' + esc(it.name.replace(/\.docx$/i, '')) + '</span>' +
+      '<span class="ru-meta"><span class="stage" style="background:' + st.c + ';color:' + (st.dark ? '#1a1814' : '#fff') + '">' + esc(it.stage) + '</span>' +
+      '<span><b>' + esc(it.masechta) + '</b>' + (it.desk ? ' · ' + esc(it.desk) : '') + '</span><span>by ' + esc(it.by) + '</span></span>' +
+      '<span class="ru-time"><b>' + esc(tm) + '</b> ' + esc(day) + ' · ' + esc(ruAgo(it.at)) + '</span></span></a>';
+  }
+  async function screenRecent(quiet) {
+    if (!quiet) {
+      frame({ title: 'Recent uploads', tab: 'more', back: '#/more', backLabel: 'More', refresh: true });
+      loading();
+    }
+    var items = await loadRecent();
+    if (currentRoute().replace(/^\/?/, '').split('/')[0] !== 'recent') return;
+    var tm = new Intl.DateTimeFormat('en-GB', { timeZone: C.timeZone, hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date());
+    setView('<p class="note">The ' + RU_SHOW + ' newest amud files in the stage folders (Writers, Editors, Mevakrim, Proofreading, Final), newest first. Tap one to open it in Word.</p>' +
+      (items.length ? '<div class="ru-list">' + items.map(ruCard).join('') + '</div>' : '<div class="card empty">No amud files found in the stage folders.</div>') +
+      '<p class="note">Updated ' + esc(tm) + ' (Israel time). A file can take a few minutes to appear after it is uploaded. The list refreshes itself every minute while it is open.</p>');
+    clearTimeout(ruTimer);
+    ruTimer = setTimeout(function again() {
+      if (currentRoute().replace(/^\/?/, '').split('/')[0] !== 'recent') return;
+      if (document.hidden) { ruTimer = setTimeout(again, 60000); return; }
+      screenRecent(true).catch(function () { ruTimer = setTimeout(again, 60000); });
+    }, 60000);
+  }
+
   /* contacts: the site's own Contacts page, read live */
   var ALLOWED = { TABLE: 1, TBODY: 1, THEAD: 1, TR: 1, TD: 1, TH: 1, P: 1, STRONG: 1, B: 1, EM: 1, I: 1, A: 1, BR: 1, H2: 1, H3: 1, H4: 1, UL: 1, OL: 1, LI: 1, SPAN: 1 };
   function cleanHtml(html) {
@@ -3561,6 +3638,7 @@
       else if (name === 'guide') await screenGuide();
       else if (name === 'more') screenMore();
       else if (name === 'deadlines') await screenDeadlines();
+      else if (name === 'recent') await screenRecent();
       else if (name === 'graphics') await screenGraphics(arg);
       else if (name === 'feedback') await screenFeedback(arg);
       else if (name === 'files') { if (!arg) S.fileQ = ''; await screenFiles(r.slice(1).map(decodeURIComponent).join('/')); }
