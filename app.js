@@ -2790,8 +2790,8 @@
         if (w[1].now.length) feNowL.push('<li><b>' + esc(w[2]) + ': ' + w[1].now.length + '</b><br><span class="muted">' + esc(feShort(w[1].now)) + '</span></li>');
         w[1].later.forEach(function (it) { var t = feLeft(it, w[0] === 'rev' ? 'rev' : 'edit', true).replace(/^Waiting: /, ''); feWaitN++; (feWait[t] = feWait[t] || []).push(it); });
       });
-      h += '<div class="card feleft"><b>What is left for ' + (who ? esc(owners[who]) : 'you') + '</b>' +
-        (feNowL.length ? '<ul>' + feNowL.join('') + '</ul>' : '<p class="muted">Nothing for you to do right now.</p>') +
+      h += '<div class="card feleft"><b>Final editing: what is left for ' + (who ? esc(owners[who]) : 'you') + '</b>' +
+        (feNowL.length ? '<ul>' + feNowL.join('') + '</ul>' : '<p class="muted">No final editing for you right now.</p>') +
         (feWaitN ? '<p><b>Not with you yet (' + feWaitN + '):</b></p><ul>' + Object.keys(feWait).map(function (t) {
           return '<li>' + esc(t) + ': <b>' + feWait[t].length + '</b> <span class="muted">(' + esc(feShort(feWait[t])) + ')</span></li>'; }).join('') + '</ul>' : '') + '</div>';
       var feSec = function (title, box, emptyText, laterText, kind) {
