@@ -37,7 +37,7 @@ window.MDY_CONFIG = {
     /* Berachos (YB, 3 Nov 2026): no Kramer; final editing (R' Waldman, R' Bressler), then the final check (AI Checked)
        and the AI proofread before the proofreader */
     { name: 'Berachos', masechtos: ['Berachos'],
-      stages: ['Open', 'Generated', 'Edited', 'Mevukar', 'Final Edited', 'AI Checked', 'AI Proofread', 'Proofread', 'Final'] }
+      stages: ['Open', 'Generated', 'Edited', 'Mevukar', 'Final Edited', 'Proofread', 'Final'] } /* AI Checked and AI Proofread removed (YB, 5 Nov 2026): the AI steps send emails and never move the tracker */
   ],
   /* A row still on a stage that has been taken off its workflow moves on to this one with Next / Submit (28 Oct 2026). */
   retiredNext: { 'Written': 'Edited', 'Run': 'Edited', 'Post Kramer': 'Edited 2', 'Edited 3': 'Proofread', 'Review 2': 'Proofread', 'Mevukar 2': 'Proofread', 'Check': 'Final', 'Closed': 'Final' },

@@ -2739,6 +2739,8 @@
     var pd = proofDesk ? await proofDeskRows(rows) : null;
     markFromDeadlines(who || null);
     var fa = finalAreas(dls, rows, who ? function (d) { return ownerKey(d) === who; } : deadlineIsMine);
+    /* which amudim with the proofreader already have Claude's pass (so they are with Mrs. Mayer) */
+    var feAi = {}; if (fa.rev.later.length) { try { (await proofDeskRows(fa.rev.later.map(function (it) { return it.r; }))).now.forEach(function (r) { feAi[r.id] = 1; }); } catch (e) {} }
     var mine = (who ? rows.filter(function (r) { return S.fromDl[r.id]; }) : rows.filter(isMine)).filter(function (r) { return !fa.ids[r.id]; });
     var now = mine.filter(function (r) { var d = S.fromDl[r.id]; return !d || isStarred(r.id) || dlClose(d) || deskNow(r, dlWant(d)); });
     var later = mine.filter(function (r) { return now.indexOf(r) < 0; });
@@ -2765,17 +2767,44 @@
       return '<option value="' + esc(k) + '"' + (k === who ? ' selected' : '') + '>' + esc(owners[k]) + '</option>';
     }).join('') + '</select></label>';
     if (feAny) {
-      var feSec = function (title, box, emptyText, laterText) {
+      /* what is left on each amud (YB, 5 Nov 2026: "make sure the desk tells each final editor exactly what is left to be done") */
+      var feLeft = function (it, kind, later) {
+        var r = it.r, ber = r.masechta === 'Berachos';
+        if (!later) return kind === 'rev' ? 'For you: review Mrs. Mayer’s proofread, then put it in Final'
+          : ber ? 'For you: your final edit, then Submit (it goes to Final Editing)' : 'For you: your edit, then Submit (it goes to your Edited 2 folder)';
+        if (kind === 'rev') return feAi[r.id] ? 'Waiting: with Mrs. Mayer (the AI proofread is done)' : ber ? 'Waiting: the AI check and AI proofread, then Mrs. Mayer' : 'Waiting: the AI proofread, then Mrs. Mayer';
+        var w = { 'Open': 'not written yet', 'Generated': 'with the first-round editor', 'Written': 'with the first-round editor', 'Run': 'with the first-round editor',
+          'Edited': r.masechta === 'Kerisos' ? 'with R’ Muller (review)' : 'with the content editor', 'Reviewed': 'with the content editor',
+          'Mevukar': 'content edited, on its way to R’ Kramer', 'Kramer': 'with R’ Kramer' }[r.stage];
+        return 'Waiting: ' + (w || r.stage);
+      };
+      var feShort = function (items) {
+        var by = {}, ord = [];
+        items.forEach(function (it) { var t = String(it.r.title || ''), sp = t.indexOf(' '), m = sp > 0 ? t.slice(0, sp) : '';
+          if (!by[m]) { by[m] = []; ord.push(m); } by[m].push(sp > 0 ? t.slice(sp + 1) : t); });
+        return ord.map(function (m) { return (m ? m + ' ' : '') + by[m].join(', '); }).join(' · ');
+      };
+      var feWhat = [['edit', fa.edit, 'Your edit, then Submit'], ['bedit', fa.bedit, 'Your final edit (Berachos), then Submit'], ['rev', fa.rev, 'Review Mrs. Mayer’s proofread and put it in Final']];
+      var feNowL = [], feWait = {}, feWaitN = 0;
+      feWhat.forEach(function (w) {
+        if (w[1].now.length) feNowL.push('<li><b>' + esc(w[2]) + ': ' + w[1].now.length + '</b><br><span class="muted">' + esc(feShort(w[1].now)) + '</span></li>');
+        w[1].later.forEach(function (it) { var t = feLeft(it, w[0] === 'rev' ? 'rev' : 'edit', true).replace(/^Waiting: /, ''); feWaitN++; (feWait[t] = feWait[t] || []).push(it); });
+      });
+      h += '<div class="card feleft"><b>What is left for ' + (who ? esc(owners[who]) : 'you') + '</b>' +
+        (feNowL.length ? '<ul>' + feNowL.join('') + '</ul>' : '<p class="muted">Nothing for you to do right now.</p>') +
+        (feWaitN ? '<p><b>Not with you yet (' + feWaitN + '):</b></p><ul>' + Object.keys(feWait).map(function (t) {
+          return '<li>' + esc(t) + ': <b>' + feWait[t].length + '</b> <span class="muted">(' + esc(feShort(feWait[t])) + ')</span></li>'; }).join('') + '</ul>' : '') + '</div>';
+      var feSec = function (title, box, emptyText, laterText, kind) {
         if (!box.now.length && !box.later.length) return '';
         var x = '<h2 class="sec">' + title + ' <small>' + box.now.length + '</small></h2>';
-        x += box.now.length ? '<div class="rows">' + box.now.map(function (it) { return rowHtml(it.r, 0, feLine(it)); }).join('') + '</div>' : '<div class="card empty">' + emptyText + '</div>';
+        x += box.now.length ? '<div class="rows">' + box.now.map(function (it) { return rowHtml(it.r, 0, feLeft(it, kind, false) + ' · ' + feLine(it)); }).join('') + '</div>' : '<div class="card empty">' + emptyText + '</div>';
         if (box.later.length) x += '<details class="card later"><summary>Coming later (' + box.later.length + ', ' + laterText + ')</summary><div class="rows">' +
-          box.later.map(function (it) { return rowHtml(it.r, 0, feLine(it)); }).join('') + '</div></details>';
+          box.later.map(function (it) { return rowHtml(it.r, 0, feLeft(it, kind, true) + ' · ' + feLine(it)); }).join('') + '</div></details>';
         return x;
       };
-      h += feSec('To edit · back from R’ Kramer', fa.edit, 'Nothing back from R’ Kramer yet.', 'still before R’ Kramer');
-      h += feSec('To edit · back from the content editor', fa.bedit, 'Nothing back from the content editor yet.', 'still before the content editor');
-      h += feSec('To review · back from the proofreader', fa.rev, 'Nothing back from the proofreader yet.', 'with the proofreader now');
+      h += feSec('To edit · back from R’ Kramer', fa.edit, 'Nothing back from R’ Kramer yet.', 'still before R’ Kramer', 'edit');
+      h += feSec('To edit · back from the content editor', fa.bedit, 'Nothing back from the content editor yet.', 'still before the content editor', 'edit');
+      h += feSec('To review · back from the proofreader', fa.rev, 'Nothing back from the proofreader yet.', 'with the proofreader now', 'rev');
       if (now.length || later.length) h += '<h2 class="sec">Your other deadlines <small>' + now.length + '</small></h2>';
     }
     var pLine = function (r) { return pd && pd.line[r.id] ? rowHtml(r, 0, pd.line[r.id]) : rowHtml(r); };
