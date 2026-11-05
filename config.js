@@ -46,7 +46,7 @@ window.MDY_CONFIG = {
   /* Ask Chaim Levy's second set of tools (ask-tools.js: live files, attachments, marked-up Word files, the team chat and
      feedback sheets). The tools only run once the relay offers them; this switch shows the attach button. Turn it on
      together with the relay update. */
-  askExtras: false,
+  askExtras: true,
   chatUrl: 'https://chat.google.com/room/AAQAnjn0HSU?cls=5',
   /* Everyone on the team by both addresses: some sign in with their Aleh Zayis (tenant) address, some with their
      personal one (YB, 1 Nov 2026). The key is the surname, as the Deadlines list's Who column has it.
