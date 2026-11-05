@@ -454,9 +454,13 @@
      deadlines whose "Done when" is Edited 2 or Final (finished deadlines too), until each is Final. */
   var FE_EDIT = { 'Kramer': 1, 'Post Kramer': 1 }, FE_REV = { 'Proofread': 1, 'Check': 1 };
   var FE_PROOF = { 'Edited 2': 1, 'Mevukar 2': 1, 'Edited 3': 1, 'Review 2': 1 }, FE_END = { 'Final': 1, 'Closed': 1 };
-  function dlIsFE(d) { var t = dlWant(d); return t === 'Final' || t === 'Edited 2'; }
+  /* Berachos (YB, 5 Nov 2026): R' Waldman's Berachos final editing ("Final Edited (final editors)") gets the same areas. No R' Kramer
+     there: an amud is his to edit once back from the content editor (Mevukar); Final Edited, AI Checked and AI Proofread are with the
+     final check, the AI proofreader and Mrs. Mayer; Proofread is back for his review */
+  var FE_B_EDIT = { 'Mevukar': 1 }, FE_B_REV = { 'Proofread': 1 }, FE_B_PROOF = { 'Final Edited': 1, 'AI Checked': 1, 'AI Proofread': 1 };
+  function dlIsFE(d) { var t = dlWant(d); return t === 'Final' || t === 'Edited 2' || t === 'Final Edited'; }
   function finalAreas(dls, rows, test) {
-    var A = { edit: { now: [], later: [] }, rev: { now: [], later: [] }, seen: {}, ids: {} };
+    var A = { edit: { now: [], later: [] }, bedit: { now: [], later: [] }, rev: { now: [], later: [] }, seen: {}, ids: {} };
     function put(box, r, due) {
       var k = r.id, had = A.seen[k];
       if (!had) { had = A.seen[k] = { r: r, dl: due }; box.push(had); A.ids[k] = 1; }
@@ -468,11 +472,12 @@
       var isFinal = dlWant(d) === 'Final';
       dlRows(asFinal, rows).forEach(function (r) {
         if (FE_END[r.stage]) return;
-        var due = owed[r.id] && d.due ? d : null;
-        if (FE_EDIT[r.stage]) put(A.edit.now, r, due);
-        else if (FE_REV[r.stage]) put(A.rev.now, r, isFinal ? due : null);
-        else if (FE_PROOF[r.stage]) put(A.rev.later, r, isFinal ? due : null);
-        else if (due) put(A.edit.later, r, due);
+        var due = owed[r.id] && d.due ? d : null, ber = r.masechta === 'Berachos';
+        var E = ber ? A.bedit : A.edit, fe = ber ? FE_B_EDIT : FE_EDIT, fr = ber ? FE_B_REV : FE_REV, fp = ber ? FE_B_PROOF : FE_PROOF;
+        if (fe[r.stage]) put(E.now, r, due);
+        else if (fr[r.stage]) put(A.rev.now, r, isFinal ? due : null);
+        else if (fp[r.stage]) put(A.rev.later, r, isFinal ? due : null);
+        else if (due) put(E.later, r, due);
       });
     });
     return A;
@@ -2691,8 +2696,8 @@
     if (myNext) h += '<a class="card dl" href="#/deadlines" style="text-decoration:none">' + deadlineCard(myNext).replace(/^<article class="card dl">|<\/article>$/g, '') + '</a>';
     h += '<a class="btn block" href="#/submit">' + ICON.up + 'Submit work</a></div><div class="hg-list">';
     var long = now.filter(function (r) { var d = daysIn(r); return d !== null && d >= (C.stale || { warn: 7 }).warn; }).length;
-    var feAny = fa.edit.now.length + fa.edit.later.length + fa.rev.now.length + fa.rev.later.length;
-    h += '<h2 class="sec">' + (who ? esc(owners[who]) + '’s desk' : 'On your desk') + ' <small>' + (now.length + fa.edit.now.length + fa.rev.now.length) + '</small>' + (long ? ' <i class="indays warn">' + long + ' a week or more</i>' : '') + '</h2>';
+    var feAny = fa.edit.now.length + fa.edit.later.length + fa.bedit.now.length + fa.bedit.later.length + fa.rev.now.length + fa.rev.later.length;
+    h += '<h2 class="sec">' + (who ? esc(owners[who]) + '’s desk' : 'On your desk') + ' <small>' + (now.length + fa.edit.now.length + fa.bedit.now.length + fa.rev.now.length) + '</small>' + (long ? ' <i class="indays warn">' + long + ' a week or more</i>' : '') + '</h2>';
     if (oorder.length) h += '<label class="deskwho">Show <select data-act="deskwho"><option value="">Me</option>' + oorder.map(function (k) {
       return '<option value="' + esc(k) + '"' + (k === who ? ' selected' : '') + '>' + esc(owners[k]) + '</option>';
     }).join('') + '</select></label>';
@@ -2706,6 +2711,7 @@
         return x;
       };
       h += feSec('To edit · back from R’ Kramer', fa.edit, 'Nothing back from R’ Kramer yet.', 'still before R’ Kramer');
+      h += feSec('To edit · back from the content editor', fa.bedit, 'Nothing back from the content editor yet.', 'still before the content editor');
       h += feSec('To review · back from the proofreader', fa.rev, 'Nothing back from the proofreader yet.', 'with the proofreader now');
       if (now.length || later.length) h += '<h2 class="sec">Your other deadlines <small>' + now.length + '</small></h2>';
     }
