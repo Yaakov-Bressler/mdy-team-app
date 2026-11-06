@@ -3287,19 +3287,112 @@
       '<p class="slogan">It’s not about the Daf, it’s about the Yomi!</p>');
   }
 
+  /* ---------- Deadlines screen (YB, 6 Nov 2026: "cleaner, there's too much info"; order by date or by masechta) ----------
+     Each deadline is one short card: days, title, whose and when, one progress bar and one word on the pace. Tap it for the
+     rest (Details, the amudim still to do, the full pace line). By masechta: first-round editing, then content editing, then
+     final editing (then proofreading and anything else), each in Shas order of masechta and then by its first amud. */
+  var DL_KINDS = ['First-round editing', 'Content editing', 'Final editing', 'Proofreading', 'Other deadlines'];
+  var SHAS_ORDER = ['Berachos', 'Temurah', 'Kerisos', 'Meilah', 'Kinnim', 'Tamid', 'Middos'];
+  function dlKind(d) {
+    var t = String((d.f || {}).Target || '').trim();
+    if (/^Edited \(first-round/i.test(t)) return 0;
+    if (/^Mevukar/i.test(t)) return 1;
+    if (/^(Final|Post Kramer|Edited 2)\b/i.test(t)) return 2;
+    if (/^Proofread/i.test(t)) return 3;
+    var txt = (d.title + ' ' + String((d.f || {}).Job || '')).toLowerCase();   /* no "Done when": read the title and Job */
+    if (/first[- ]round/.test(txt)) return 0;
+    if (/content/.test(txt)) return 1;
+    if (/final/.test(txt)) return 2;
+    if (/proof/.test(txt)) return 3;
+    return 4;
+  }
+  function dlMasOf(d) {
+    var f = d.f || {}, spec = dlSpec(f.Amudim == null || String(f.Amudim).trim() === '' ? 'all' : f.Amudim);
+    var named = spec.inc.filter(function (t) { return t.mas; })[0], list = dlMasechtos(f.Masechta);
+    var m = named ? named.mas : (list[0] || C.masechtos.filter(function (x) { return d.title.indexOf(x) > -1; })[0] || '');
+    var hit = SHAS_ORDER.filter(function (x) { return x.toLowerCase() === String(m).toLowerCase(); })[0];
+    return { name: hit || m, ord: hit ? SHAS_ORDER.indexOf(hit) : 99, first: dlFirstOrd(spec) };
+  }
+  function dlFirstOrd(spec) {
+    var t = spec.inc[0];
+    if (!t || t.all) return 0;
+    var a = t.one || t.from;
+    return a ? a.ord * 10 + (a.part || 0) : 0;
+  }
+  /* inside final editing, the earlier step first: Edited 2 (R' Waldman's pass) before Final Edited before Final */
+  function dlStep(d) { var t = String((d.f || {}).Target || ''); return /^Final Edited/i.test(t) ? 1 : /^Final\b/i.test(t) ? 2 : 0; }
+  function dlByMasechta(a, b) {
+    var x = dlMasOf(a), y = dlMasOf(b);
+    return x.ord - y.ord || String(x.name).localeCompare(String(y.name)) || dlStep(a) - dlStep(b) || x.first - y.first ||
+      ((a.due || '9') < (b.due || '9') ? -1 : (a.due || '9') > (b.due || '9') ? 1 : 0) || a.title.localeCompare(b.title);
+  }
+  function dlSortPref(v) {
+    try { if (v == null) return localStorage.getItem('mdyDlSort') === 'Masechta' ? 'Masechta' : 'Date'; localStorage.setItem('mdyDlSort', v); } catch (e) {}
+    return v || 'Date';
+  }
+  function dlShort(d) {
+    var t = S.tracker ? dlTally(d, S.tracker) : null, p = t ? pace(d, t) : null;
+    var done = t && t.total && t.done >= t.total;
+    var cls = d.days == null ? '' : d.days < 0 ? 'late' : d.days <= 7 ? 'soon' : '';
+    var daysTxt = d.days == null ? '–' : d.days === 0 ? 'Today' : Math.abs(d.days);
+    var daysLbl = d.days == null || d.days === 0 ? '' : d.days < 0 ? 'late' : d.days === 1 ? 'day' : 'days';
+    if (done) { cls = 'done'; daysTxt = '✓'; daysLbl = 'done'; }
+    var pill = done ? { cls: 'ok', label: 'Done' } : p ? p : d.due ? null : { cls: 'wait', label: 'No due date' };
+    var pct = t && t.total ? Math.round(100 * t.done / t.total) : 0;
+    /* the owner only when the title doesn't already name him; the date first so it never gets cut off on a phone */
+    var who = ownerName(d), sn = String(who).replace(/[()]/g, ' ').trim().split(/\s+/).pop() || '';
+    if (sn && d.title.toLowerCase().indexOf(sn.toLowerCase()) > -1) who = '';
+    var meta = [fmtDate(d.due) || 'No due date', S.dlSort === 'Masechta' ? '' : DL_KINDS[dlKind(d)], who].filter(Boolean);
+    /* the rest, behind the tap */
+    var f = d.f || {}, more = '';
+    var det = String(f.Details || '').trim();
+    if (det) more += '<p class="dlx-det">' + esc(det) + '</p>';
+    if (p && p.text) more += '<p class="dlx-pace">' + esc(p.text) + '</p>';
+    var left = S.tracker ? dlRows(d, S.tracker) : [];
+    if (left.length) more += '<div class="dlx-left"><span>Still to do (' + left.length + ')</span><div>' + left.map(function (r) {
+      return '<span class="dlx-am"><b>' + esc(String(r.title).replace(/^\S+\s+/, '').replace(/^0+(?=\d)/, '')) + '</b>' + stageChip(r.stage) + '</span>';
+    }).join('') + '</div></div>';
+    var bits = [];
+    if (f.Amudim) bits.push('Amudim: ' + String(f.Amudim).trim());
+    if (f.Target) bits.push('Done when: ' + String(f.Target).trim());
+    var heb = d.lines.filter(function (l) { return l.he && !l.job; }).map(function (l) { return l.value; })[0];
+    if (bits.length || heb) more += '<p class="dlx-small">' + esc(bits.join(' · ')) + (heb ? (bits.length ? ' · ' : '') + '<span lang="he" dir="rtl">' + esc(heb) + '</span>' : '') + '</p>';
+    var head = '<div class="days ' + cls + '"><b>' + esc(daysTxt) + '</b><span>' + esc(daysLbl) + '</span></div>' +
+      '<div class="dlx-main"><b class="dlx-t">' + esc(d.title) + '</b>' +
+      '<span class="dlx-meta">' + esc(meta.join(' · ')) + '</span>' +
+      (t && t.total ? '<span class="dlx-prog"><span class="dlx-bar"><i style="width:' + pct + '%"></i></span><span class="dlx-n">' + esc(fmtN(t.done) + '/' + fmtN(t.total)) + '</span>' +
+        (pill ? '<span class="pl ' + pill.cls + '">' + esc(pill.label) + '</span>' : '') + '</span>'
+        : (pill ? '<span class="dlx-prog"><span class="pl ' + pill.cls + '">' + esc(pill.label) + '</span></span>' : '')) +
+      '</div>';
+    return '<article class="card dlx' + (done ? ' isdone' : '') + '">' + (more ? '<details><summary>' + head + '<span class="dlx-chev">' + ICON.chev + '</span></summary><div class="dlx-more">' + more + '</div></details>' : '<div class="dlx-head">' + head + '</div>') + '</article>';
+  }
   async function screenDeadlines() {
-    var sub = '<div class="chips" role="group" aria-label="Show">' + ['All', 'Mine'].map(function (x) {
-      return '<button class="chipbtn" data-act="dfilter" data-k="' + x + '" aria-pressed="' + (S.deadlineFilter === x) + '">' + x + '</button>';
-    }).join('') + '</div>';
+    S.dlSort = dlSortPref();
+    var chip = function (act, k, label, on) { return '<button class="chipbtn" data-act="' + act + '" data-k="' + k + '" aria-pressed="' + on + '">' + label + '</button>'; };
+    var sub = '<div class="chips dlbar"><span class="chips" role="group" aria-label="Show">' +
+      chip('dfilter', 'All', 'All', S.deadlineFilter === 'All') + chip('dfilter', 'Mine', 'Mine', S.deadlineFilter === 'Mine') +
+      '</span><span class="chips" role="group" aria-label="Order">' +
+      chip('dsort', 'Date', 'By date', S.dlSort === 'Date') + chip('dsort', 'Masechta', 'By masechta', S.dlSort === 'Masechta') + '</span></div>';
     frame({ title: 'Deadlines', tab: 'more', back: '#/more', backLabel: 'More', refresh: true, sub: sub });
     loading();
-    var all = await loadDeadlines();
+    var got = await Promise.all([loadDeadlines(), loadTracker().catch(function () { return null; })]);
+    var all = got[0];
     var list = S.deadlineFilter === 'Mine' ? all.filter(deadlineIsMine) : all;
-    var up = list.filter(function (d) { return d.days == null || d.days >= 0; });
-    var past = list.filter(function (d) { return d.days != null && d.days < 0; });
-    var h = up.length ? up.map(deadlineCard).join('') : '<div class="card empty">No upcoming deadlines' + (S.deadlineFilter === 'Mine' ? ' with your name on them' : '') + '.</div>';
-    if (past.length) h += '<details class="card"><summary style="cursor:pointer;font-weight:700;min-height:32px">Past deadlines (' + past.length + ')</summary><div style="display:flex;flex-direction:column;gap:10px;margin-top:10px">' + past.reverse().map(deadlineCard).join('') + '</div></details>';
-    h += '<p class="note">Deadlines are added on the site’s Deadlines list.</p>';
+    /* as on the site (YB, 4 Nov 2026): a finished deadline drops off once its due date has passed; an unfinished one stays, overdue */
+    list = list.filter(function (d) {
+      if (d.days == null || d.days >= 0) return true;
+      var t = S.tracker ? dlTally(d, S.tracker) : null;
+      return t && t.total ? t.done < t.total : !S.tracker;
+    });
+    var h;
+    if (!list.length) h = '<div class="card empty">No deadlines' + (S.deadlineFilter === 'Mine' ? ' with your name on them' : '') + ' right now.</div>';
+    else if (S.dlSort === 'Masechta') {
+      h = DL_KINDS.map(function (k, i) {
+        var g = list.filter(function (d) { return dlKind(d) === i; }).sort(dlByMasechta);
+        return g.length ? '<h3 class="dlx-h">' + esc(k) + ' <span>' + g.length + '</span></h3>' + g.map(dlShort).join('') : '';
+      }).join('');
+    } else h = list.slice().sort(function (a, b) { return (a.due || '9') < (b.due || '9') ? -1 : (a.due || '9') > (b.due || '9') ? 1 : 0; }).map(dlShort).join('');
+    h += '<p class="note">Tap a deadline for its details and the amudim still to do. Deadlines are added on the site’s Deadlines list.</p>';
     setView(h);
   }
 
@@ -3720,6 +3813,7 @@
     if (act === 'gfxundo') { gfxUndo(); return; }
     if (act === 'gm') { S.graphicsM = el.getAttribute('data-m'); route(); return; }
     if (act === 'dfilter') { S.deadlineFilter = el.getAttribute('data-k'); route(); return; }
+    if (act === 'dsort') { S.dlSort = dlSortPref(el.getAttribute('data-k')); route(); return; }
     if (act === 'gexact') {
       var ex = exactPref(!exactPref());
       el.setAttribute('aria-pressed', String(ex));

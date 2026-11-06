@@ -401,3 +401,47 @@ a.card.ru:hover .ru-name { text-decoration: underline; }
 .card.feleft li { margin: 4px 0; }
 .card.feleft p { margin: 6px 0 2px; }
 .muted { color: var(--muted); }
+
+/* Deadlines screen, compact cards (6 Nov 2026) */
+.dlbar { gap: 8px 16px; align-items: center; }
+.dlbar > .chips { gap: 6px; flex-wrap: nowrap; }
+.dlbar .chipbtn { min-height: 32px; padding: 0 12px; font-size: 13px; }
+.dlx { padding: 0; }
+.dlx details > summary { list-style: none; cursor: pointer; }
+.dlx details > summary::-webkit-details-marker { display: none; }
+.dlx summary, .dlx .dlx-head { display: flex; gap: 12px; align-items: center; padding: 12px 14px; min-height: 64px; }
+.dlx .days { width: 50px; padding: 6px 0; }
+.dlx .days b { font-size: 19px; }
+.dlx .days span { font-size: 11px; }
+.days.done { background: #dff3e6; color: #17733a; }
+.dlx-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.dlx-t { font-size: 15.5px; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.dlx-meta { font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dlx-prog { display: flex; align-items: center; gap: 8px; margin-top: 3px; }
+.dlx-bar { flex: 1; max-width: 220px; height: 6px; border-radius: 3px; background: #ebe7de; overflow: hidden; }
+.dlx-bar i { display: block; height: 100%; background: var(--navy); border-radius: 3px; }
+.isdone .dlx-bar i { background: #1db954; }
+.dlx-n { font-size: 12.5px; font-weight: 700; color: var(--ink-2); white-space: nowrap; }
+.dlx .pl { flex: none; padding: 1px 8px; border-radius: 999px; font-size: 11.5px; font-weight: 700; white-space: nowrap; max-width: 46vw; overflow: hidden; text-overflow: ellipsis; }
+.dlx .pl.ok { background: #dff3e6; color: #17733a; }
+.dlx .pl.warn { background: #fff3cd; color: #8a5a00; }
+.dlx .pl.late { background: #fde2e1; color: #b3261e; }
+.dlx .pl.wait { background: #e8edf5; color: #2f4a7a; }
+.dlx-chev { flex: none; display: flex; color: var(--muted); }
+.dlx-chev svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; transition: transform .15s; }
+.dlx details[open] .dlx-chev svg { transform: rotate(90deg); }
+.dlx-more { padding: 0 14px 14px 76px; display: flex; flex-direction: column; gap: 8px; font-size: 13.5px; color: var(--ink-2); }
+.dlx-more p { margin: 0; line-height: 1.4; }
+.dlx-pace, .dlx-small { color: var(--muted); font-size: 12.5px; }
+.dlx-left > span { font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.dlx-left > div { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 5px; }
+.dlx-am { display: inline-flex; align-items: center; gap: 5px; padding: 2px 3px 2px 8px; border: 1px solid var(--line, #e3dfd6); border-radius: 8px; font-size: 13px; }
+.dlx-am .stage { font-size: 11px; padding: 1px 6px; }
+.dlx-h { margin: 14px 2px 2px; font-size: 13px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-2); }
+.dlx-h:first-child { margin-top: 2px; }
+.dlx-h span { color: var(--muted); font-weight: 700; margin-left: 4px; }
+@media (max-width: 520px) { .dlx-more { padding-left: 14px; } }
+@media (min-width: 900px) {
+  .view[data-screen="deadlines"] { align-items: start; }
+  .view[data-screen="deadlines"] > .dlx-h, .view[data-screen="deadlines"] > .empty { grid-column: 1 / -1; }
+}
