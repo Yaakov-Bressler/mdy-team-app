@@ -3290,9 +3290,9 @@
   /* ---------- Deadlines screen (YB, 6 Nov 2026: "cleaner, there's too much info"; order by date or by masechta) ----------
      Each deadline is one short card: days, title, whose and when, one progress bar and one word on the pace. Tap it for the
      rest (Details, the amudim still to do, the full pace line). By masechta: first-round editing, then content editing, then
-     final editing (then proofreading and anything else), each in Shas order of masechta and then by its first amud. */
+     final editing (then proofreading and anything else), each in production order of masechta and then by its first amud. */
   var DL_KINDS = ['First-round editing', 'Content editing', 'Final editing', 'Proofreading', 'Other deadlines'];
-  var SHAS_ORDER = ['Berachos', 'Temurah', 'Kerisos', 'Meilah', 'Kinnim', 'Tamid', 'Middos'];
+  var SHAS_ORDER = ['Temurah', 'Kerisos', 'Meilah', 'Kinnim', 'Tamid', 'Middos', 'Berachos'];   /* production order (YB, 6 Nov 2026), not Shas order */
   function dlKind(d) {
     var t = String((d.f || {}).Target || '').trim();
     if (/^Edited \(first-round/i.test(t)) return 0;
