@@ -44,9 +44,14 @@
     var wf = (rowWf ? hits.filter(function (w) { return w.workflow === rowWf; })[0] : null) || hits.filter(function (w) { return !w.workflow; })[0];
     return wf ? wf.stages : (S.stages || Object.keys(C.stageColors));
   }
+  /* stage chips as a pale tint with a dot (YB, 8 Nov 2026: the site's sleeker look) */
+  function tint(hex, a) {
+    var m = /^#?([0-9a-f]{6})$/i.exec(hex || ''); if (!m) return 'rgba(138,143,152,' + a + ')';
+    var n = parseInt(m[1], 16); return 'rgba(' + (n >> 16 & 255) + ',' + (n >> 8 & 255) + ',' + (n & 255) + ',' + a + ')';
+  }
   function stageChip(s, label) {
     var c = stageColor(s);
-    return '<span class="stage" style="background:' + c + ';color:' + (LIGHT[c] ? '#1a1814' : '#fff') + '">' + esc(label || s || '—') + '</span>';
+    return '<span class="stage" style="background:' + tint(c, 0.13) + '"><i style="background:' + c + '"></i>' + esc(label || s || '—') + '</span>';
   }
   function stageIn(text) {
     var names = (S.stages || Object.keys(C.stageColors)).slice().sort(function (a, b) { return b.length - a.length; });
@@ -2815,7 +2820,7 @@
     if (later.length) h += '<details class="card later"><summary>Coming later (' + later.length + ', still at earlier stages)</summary><div class="rows">' + later.map(pLine).join('') + '</div></details>';
     if (pd && (pd.now.length || pd.later.length)) h += '<p class="note">Proofreading: an amud is on this desk once Claude’s proofreading pass is in the masechta’s Proofreading › Claude folder. Hand in to Proofreading › Proofreader.</p>';
     else if (mine.length) h += '<p class="note">Amudim from ' + (who ? 'his' : 'your') + ' deadlines that haven’t reached the deadline’s stage' + (who ? '' : ', plus any you’ve starred') + '. The grey tag is how long an amud has been in its stage; amber after a week, red after two. Tap a name to open its latest file.</p>';
-    h += '</div><div class="hg-links"><h2 class="sec">Quick links</h2><div class="card pad0 navlist">' +
+    h += '</div><div class="hg-links">' + volumeDonuts(rows) + '<h2 class="sec">Quick links</h2><div class="card pad0 navlist">' +
       '<a href="#/guide">' + ICON.pen.replace('M4 20l1-4L16 5a2.1 2.1 0 0 1 3 3L8 19z', 'M11 4.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zM16 16l4.5 4.5') + '<span class="grow">Look-ups, phrases and headers</span>' + ICON.chev + '</a>' +
       '<a href="#/ask">' + ICON.ask + '<span class="grow">Ask Chaim Levy</span><span class="aside">AI assistant</span>' + ICON.chev + '</a>' +
       '<a href="#/deadlines">' + ICON.cal + '<span class="grow">All deadlines</span>' + ICON.chev + '</a>' +
@@ -2834,65 +2839,192 @@
       '</div>';
   }
 
-  /* The site's Workflow page banner: one bar per volume in production, every stage, Final and Closed shown together as Final.
-     A bar shows from its 'from' date (Israel time) until every amud in it is Final, then hides itself (YB, 18 Oct 2026).
-     A one-masechta volume is left out while that masechta is the one in view, since its own card shows the same. */
-  function volumeBanner(rows, inView, dls) {
-    var today = ymdIn(new Date());
-    return (C.volumes || []).map(function (v) {
-      if (v.from && today < v.from) return '';
-      if (v.masechtos.length === 1 && v.masechtos[0] === inView) return ''; /* the masechta's own card below already shows it */
-      var stg = {}, total = 0, done = 0;
-      rows.forEach(function (r) {
-        if (v.masechtos.indexOf(r.masechta) < 0) return;
-        var st = r.stage === 'Closed' ? 'Final' : (r.stage || 'Open');
-        stg[st] = (stg[st] || 0) + 1; total++;
-        if (st === 'Final') done++;
-      });
-      if (!total || done >= total) return '';
-      var vlist = stagesFor(v.masechtos);
-      var order = vlist.filter(function (s) { return stg[s]; }).concat(Object.keys(stg).filter(function (s) { return vlist.indexOf(s) < 0; }));
-      return '<section class="card vol" aria-label="' + esc(v.name) + ' by stage"><div class="volhead"><b>' + esc(v.name) + '</b>' + (v.sub ? '<span class="note">' + esc(v.sub) + '</span>' : '') +
-        '<span class="note volcount">' + done + ' of ' + total + ' in Final</span></div>' +
-        '<div class="bar">' + order.map(function (s) { return '<i style="flex:' + stg[s] + ';background:' + stageColor(s) + '" title="' + esc(s + ': ' + stg[s]) + '"></i>'; }).join('') + '</div>' +
-        '<div class="legend">' + order.map(function (s) { return stageChip(s, s + ' ' + stg[s]); }).join('') + '</div></section>';
-    }).join('');
+  /* ---------- the Tracker as the site's Workflow board (YB, 8 Nov 2026: "push all the design updates to the app") ----------
+     Every volume in production as a slim bar you tap to open (gone once all its amudim are in Final; a masechta on the tracker
+     that no volume names appears by itself), stage chips that filter, a search, Final folded away, and cards under their
+     stage with ‹ (back a step), Next, ⋯ (the move sheet: any stage, the latest file, History), the star and Submit.
+     Pictures shows each amud's five picture slots: tap one to move it on, ‹ to step it back, + Picture to add one,
+     as the site's board and the old SharePoint cards do. The Old/New grouping is retired. */
+  var HOLDER = { 'Open': 'Not started', 'Generated': 'Drafted', 'Written': 'Drafted', 'Edited': 'Editing', 'Reviewed': 'Editing', 'Run': 'Editing',
+    'Edited 2': 'Editing', 'Edited 3': 'Editing', 'Mevukar': 'Mevaker', 'Review 2': 'Mevaker', 'Mevukar 2': 'Mevaker', 'Kramer': 'R’ Kramer',
+    'Post Kramer': 'R’ Kramer', 'Final Edited': 'Final editing', 'Proofread': 'Proofreading', 'Final': 'Done', 'Closed': 'Done' };
+  var BACK_OLD = { 'Written': 'Open', 'Run': 'Generated', 'Reviewed': 'Edited', 'Post Kramer': 'Kramer', 'Edited 3': 'Edited 2', 'Review 2': 'Edited 2', 'Mevukar 2': 'Edited 2', 'Closed': 'Proofread' };
+  var GF = ['GraphicOne', 'GraphicTwo', 'GraphicThree', 'GraphicFour', 'GraphicFive'];
+  var GSTEPS = ['Requested', 'Prompted', 'Needs Approval', 'Approved', 'Reviewed', 'Ready to Go'];
+  var GCOL = { 'Requested': '#d9822b', 'Prompted': '#8b6348', 'Needs Approval': '#7b3fa8', 'Approved': '#2a5db0', 'Reviewed': '#6f9e2e', 'Ready to Go': '#1f8a4c' };
+  function showStage(s) { return s === 'Closed' ? 'Final' : (s || 'Open'); }
+  function isDone(s) { return s === 'Final' || s === 'Closed'; }
+  function prevStage(s, m, rowWf) {
+    var list = stagesFor(m, rowWf).filter(function (x) { return !UNSET_STAGES[x] || x === s; }), i = list.indexOf(s);
+    if (i > -1) return i > 0 ? list[i - 1] : null;
+    return BACK_OLD[s] || null;
   }
-
-
+  function hasPic(v) { return !!v && v !== 'None'; }
+  function inRelease(r) { return !/not in this release/i.test(String(r.notes || '')); }
+  /* the volumes in production: C.volumes from their dates, then any masechta no volume names */
+  function trackerVolumes(rows) {
+    var today = ymdIn(new Date()), out = [], named = {};
+    (C.volumes || []).forEach(function (v) {
+      v.masechtos.forEach(function (m) { named[m] = 1; });
+      if (v.from && today < v.from) return;
+      out.push({ name: v.name, sub: v.sub || '', masechtos: v.masechtos.slice() });
+    });
+    rows.forEach(function (r) { if (r.masechta && !named[r.masechta]) { named[r.masechta] = 1; out.push({ name: r.masechta, sub: '', masechtos: [r.masechta] }); } });
+    out.forEach(function (v) {
+      v.rows = rows.filter(function (r) { return v.masechtos.indexOf(r.masechta) > -1 && inRelease(r); });
+      v.total = v.rows.length;
+      v.done = v.rows.filter(function (r) { return isDone(r.stage); }).length;
+      v.count = {};
+      v.rows.forEach(function (r) { var s = showStage(r.stage); v.count[s] = (v.count[s] || 0) + 1; });
+      var base = stagesFor(v.masechtos).filter(function (s) { return !UNSET_STAGES[s] || v.count[s]; });
+      v.order = base.concat(Object.keys(v.count).filter(function (s) { return base.indexOf(s) < 0; }));
+    });
+    return out.filter(function (v) { return v.total && v.done < v.total; });
+  }
+  function volBar(v) {
+    return '<span class="tbar" aria-hidden="true">' + v.order.filter(function (s) { return v.count[s]; }).map(function (s) {
+      return '<i style="flex:' + v.count[s] + ' 1 0;background:' + stageColor(s) + '"></i>'; }).join('') + '</span>';
+  }
+  function trackerPref(k, v) {
+    try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { }
+    return null;
+  }
   async function screenTracker(m) {
     var got = await Promise.all([loadTracker(), loadDeadlines().catch(function () { return []; })]);
-    var rows = got[0], dls = got[1];
+    var rows = got[0];
     stageSync(rows);
     markFromDeadlines();
-    var ms = [];
-    rows.forEach(function (r) { if (ms.indexOf(r.masechta) < 0) ms.push(r.masechta); });
-    m = m || S.trackerM || ms[0];
-    if (ms.indexOf(m) < 0) m = ms[0];
-    S.trackerM = m;
-    var chips = '<div class="chips scroll" role="group" aria-label="Masechta">' + ms.map(function (x) {
-      return '<button class="chipbtn" data-act="tm" data-m="' + esc(x) + '" aria-pressed="' + (x === m) + '">' + esc(x) + '</button>';
-    }).join('') + '<button class="chipbtn chip-mine" data-act="tmine" aria-pressed="' + !!S.trackerMine + '">Mine</button></div>';
-    frame({ title: 'Tracker', tab: 'tracker', refresh: true, kicker: 'Amud Tracker', sub: chips });
-    var shown = rows.filter(function (r) { return r.masechta === m; });
-    var cards = S.trackerMine ? shown.filter(isMine) : shown;
-    var counts = {};
-    shown.forEach(function (r) { var st = r.stage === 'Closed' ? 'Final' : r.stage; counts[st] = (counts[st] || 0) + 1; });
-    var mlist = stagesFor(m);
-    var order = mlist.filter(function (s) { return counts[s]; }).concat(Object.keys(counts).filter(function (s) { return mlist.indexOf(s) < 0; }));
-    var done = counts.Final || 0;
-    var h = volumeBanner(rows, m, dls) + '<section class="card" aria-label="Progress"><div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px"><b>' + esc(m) + ' · ' + shown.length + ' rows</b><span class="note">' + done + ' final</span></div>' +
-      '<div class="bar">' + order.map(function (s) { return '<i style="flex:' + counts[s] + ';background:' + stageColor(s) + '" title="' + esc(s) + '"></i>'; }).join('') + '</div>' +
-      '<div class="legend">' + order.map(function (s) { return stageChip(s, s + ' ' + counts[s]); }).join('') + '</div></section>';
-    h += '<p class="note">Tap an amud to move it, or to open its latest file and history. The star keeps it in My work. The grey tag is how long it has been in its stage: amber after a week, red after two.' + (S.trackerMine ? ' Showing only your amudim.' : '') + '</p>';
-    if (S.trackerMine && !cards.length) h += '<div class="card empty">None of ' + esc(m) + '’s amudim is yours. Tap Mine again to see them all.</div>';
-    h += '<div class="grid2">' + cards.map(function (r) {
-      return '<div style="position:relative"><button class="card-btn" style="border-top-color:' + stageColor(r.stage) + ';width:100%" data-act="move" data-id="' + esc(r.id) + '">' +
-        '<b>' + esc(r.title.replace(new RegExp('^' + m + '\\s+'), '')) + '</b><span class="stg">' + stageChip(r.stage) + daysChip(r) + '</span><span class="who">' + esc(personLine(r)) + '</span></button>' +
-        '<button class="star" style="position:absolute;top:4px;right:2px" data-act="star" data-id="' + esc(r.id) + '" aria-pressed="' + isStarred(r.id) + '" aria-label="Keep ' + esc(r.title) + ' in My work">' + ICON.star + '</button></div>';
+    var vols = trackerVolumes(rows);
+    if (m) {   /* #/tracker/<volume or masechta>: from a donut on My work, or an older link */
+      var hit = vols.filter(function (v) { return v.name === m; })[0] || vols.filter(function (v) { return v.masechtos.indexOf(m) > -1; })[0];
+      if (hit) S.trackerVol = hit.name;
+    }
+    var v = vols.filter(function (x) { return x.name === S.trackerVol; })[0] || vols[0];
+    if (v) S.trackerVol = v.name;
+    if (S.tHide === undefined) S.tHide = trackerPref('mdyTHideFinal') !== '0';
+    if (S.tPics === undefined) S.tPics = trackerPref('mdyTPics') === '1';
+    if (S.tStage && v && !v.count[S.tStage]) S.tStage = '';
+    frame({ title: 'Tracker', tab: 'tracker', refresh: true, kicker: 'Amud Tracker' });
+    if (!v) { setView('<div class="card empty">Every volume on the tracker is in Final.</div>'); return; }
+    var h = '<div class="tvols" role="tablist" aria-label="Volumes in production">' + vols.map(function (x) {
+      var on = x === v;
+      return '<button class="tvol" role="tab" aria-selected="' + on + '" data-act="tvol" data-v="' + esc(x.name) + '" title="' +
+        esc(x.order.filter(function (s) { return x.count[s]; }).map(function (s) { return s + ' ' + x.count[s]; }).join(' · ')) + '">' +
+        '<span class="h"><b>' + esc(x.name) + (x.sub ? '<small>' + esc(x.sub) + '</small>' : '') + '</b><span class="c">' + x.done + ' of ' + x.total + ' in Final</span></span>' + volBar(x) + '</button>';
     }).join('') + '</div>';
-    if (!shown.length) h = '<div class="card empty">No rows for ' + esc(m) + '.</div>';
+    var wait = v.rows.filter(function (r) { return daysIn(r) !== null; }).sort(function (a, b) { return daysIn(b) - daysIn(a); })[0];
+    h += '<section class="card ttools"><div class="tchips" role="group" aria-label="Show one stage">' +
+      '<button class="tchip" data-act="tstage" data-s="" aria-pressed="' + !S.tStage + '">All <em>' + v.total + '</em></button>' +
+      v.order.filter(function (s) { return v.count[s]; }).map(function (s) {
+        return '<button class="tchip" data-act="tstage" data-s="' + esc(s) + '" aria-pressed="' + (S.tStage === s) + '"><i style="background:' + stageColor(s) + '"></i>' + esc(s) + ' <em>' + v.count[s] + '</em></button>';
+      }).join('') + '</div>' +
+      '<div class="tright"><label class="tfind"><span class="sr">Find an amud</span><input id="tq" type="search" placeholder="Find an amud, e.g. 12b" value="' + esc(S.tQ || '') + '"></label>' +
+      '<button class="chipbtn" data-act="tmine" aria-pressed="' + !!S.trackerMine + '">Mine</button>' +
+      '<button class="chipbtn" data-act="thide" aria-pressed="' + !!S.tHide + '">Hide Final</button>' +
+      '<button class="chipbtn" data-act="tpics" aria-pressed="' + !!S.tPics + '">Pictures</button></div>' +
+      (wait ? '<p class="note twait">Longest in its stage: ' + esc(wait.title) + ', ' + esc(wait.stage) + ', ' + (daysIn(wait) < 1 ? 'today' : daysIn(wait) + (daysIn(wait) === 1 ? ' day' : ' days')) + '</p>' : '') + '</section>';
+    h += '<div id="tboard">' + trackerBoard(v) + '</div>';
+    h += '<p class="note">Next moves an amud on when you finish your step; ‹ sets it back a step; ⋯ opens any stage, the latest file and History. The grey tag is how long it has been in its stage: amber after a week, red after two. The star keeps it in My work.</p>';
     setView(h);
+    var q = $('#tq');
+    if (q) q.addEventListener('input', function () { S.tQ = q.value; var b = $('#tboard'); if (b) b.innerHTML = trackerBoard(v); });
+  }
+  function trackerBoard(v) {
+    var q = String(S.tQ || '').trim().toLowerCase(), fold = S.tHide && S.tStage !== 'Final';
+    var pick = function (r) { return (!q || r.title.toLowerCase().indexOf(q) > -1) && (!S.trackerMine || isMine(r)); };
+    var one = v.masechtos.length === 1, h = '';
+    v.order.forEach(function (s) {
+      if (S.tStage && S.tStage !== s) return;
+      if (s === 'Final' && fold) return;
+      var rs = v.rows.filter(function (r) { return showStage(r.stage) === s && pick(r); });
+      if (!rs.length) return;
+      h += '<section class="tsec"><h2 class="tsh"><i style="background:' + stageColor(s) + '"></i>' + esc(s) + ' <small>' + rs.length + '</small><span class="ln"></span></h2><div class="tgrid">' +
+        rs.map(function (r) { return trackerCard(r, one); }).join('') + '</div></section>';
+    });
+    var fin = v.rows.filter(function (r) { return isDone(r.stage) && pick(r); }).length;
+    if (fold && fin && !S.tStage) h += '<div class="card tfold"><span><i style="background:' + stageColor('Final') + '"></i><b>' + fin + ' in Final</b> folded away</span><button class="chipbtn" data-act="thide" aria-pressed="true">Show them</button></div>';
+    return h || '<div class="card empty">' + (S.trackerMine ? 'None of these amudim is yours. Tap Mine again to see them all.' : 'No amud matches. Clear the search or pick another stage.') + '</div>';
+  }
+  function trackerCard(r, one) {
+    var nx = nextStage(r.stage, r.masechta, r.workflow), bk = prevStage(r.stage, r.masechta, r.workflow), name = one ? r.title.replace(new RegExp('^' + r.masechta + '\\s+'), '') : r.title;
+    var who = personLine(r) || HOLDER[r.stage] || r.stage, pics = '';
+    if (S.tPics) {
+      GF.forEach(function (f, k) {
+        var val = r.f[f]; if (!hasPic(val)) return;
+        pics += '<div class="tpic"><button class="tpb" data-act="tgback" data-id="' + esc(r.id) + '" data-f="' + f + '" aria-label="Picture ' + (k + 1) + ' back a step">‹</button>' +
+          '<button class="tpc" data-act="tgnext" data-id="' + esc(r.id) + '" data-f="' + f + '" title="Picture ' + (k + 1) + ': ' + esc(val) + '. Tap to move it on."><i style="background:' + (GCOL[val] || '#8a8f98') + '"></i>' + (k + 1) + ' · ' + esc(val) + '</button></div>';
+      });
+      for (var k = 0; k < GF.length; k++) {
+        if (!hasPic(r.f[GF[k]])) { if (k === 0 || hasPic(r.f[GF[k - 1]])) pics += '<button class="tadd" data-act="tgadd" data-id="' + esc(r.id) + '" data-f="' + GF[k] + '">+ Picture</button>'; break; }
+      }
+      pics = '<div class="tpics">' + pics + '</div>';
+    }
+    return '<article class="tcard"><div class="tc1"><a class="tname" href="' + esc(openAmudUrl(r)) + '" target="_blank" rel="noopener" title="Open the latest file">' + esc(name) + '</a>' + daysChip(r) +
+      '<button class="star" data-act="star" data-id="' + esc(r.id) + '" aria-pressed="' + isStarred(r.id) + '" aria-label="Keep ' + esc(r.title) + ' in My work">' + ICON.star + '</button></div>' +
+      '<div class="twho">' + esc(who) + '</div>' + pics +
+      '<div class="tc3">' + (bk ? '<button class="tib" data-act="tback" data-id="' + esc(r.id) + '" aria-label="Move ' + esc(r.title) + ' back to ' + esc(bk) + '" title="Back to ' + esc(bk) + '">‹</button>' : '') +
+      (nx !== r.stage && !isDone(r.stage) ? '<button class="tnext" data-act="tnext" data-id="' + esc(r.id) + '">Next: ' + esc(nx) + ' ›</button>' : '<span class="tdone">✓ Done</span>') +
+      '<span class="sp"></span><button class="tib" data-act="move" data-id="' + esc(r.id) + '" aria-label="More for ' + esc(r.title) + ': any stage, the latest file, History" title="Any stage, the latest file, History">⋯</button>' +
+      '<a class="tib" href="#/submit/' + esc(r.id) + '" aria-label="Submit work for ' + esc(r.title) + '"><svg viewBox="0 0 24 24" aria-hidden="true" style="width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round"><path d="M12 16V5M6.5 10.5L12 5l5.5 5.5M5 20h14"/></svg></a></div></article>';
+  }
+  /* one write from the board: re-read the row first, so a move someone else made a moment ago is not overwritten */
+  async function boardWrite(row, fields, label) {
+    var sid = await siteId();
+    var cur = await g('/sites/' + sid + '/lists/' + C.lists.tracker + '/items/' + row.id + '/fields');
+    var moved = ('Stage' in fields && (cur.Stage || 'Open') !== (row.stage || 'Open')) ||
+      GF.some(function (f) { return (f in fields) && (cur[f] || '') !== (row.f[f] || ''); });
+    if (moved) {
+      row.stage = cur.Stage || 'Open'; row.f.Stage = row.stage;
+      GF.forEach(function (f) { row.f[f] = cur[f] || null; });
+      toast(row.title + ' was changed by someone else a moment ago. This shows the latest; tap again if it still needs moving.');
+      return;
+    }
+    if ('Stage' in fields) await moveStage(row, fields.Stage);
+    else {
+      await g('/sites/' + sid + '/lists/' + C.lists.tracker + '/items/' + row.id + '/fields', { method: 'PATCH', body: fields });
+      Object.keys(fields).forEach(function (f) { row.f[f] = fields[f]; });
+    }
+    toast(label);
+  }
+  async function boardAct(act, el) {
+    if (act === 'tvol') { S.trackerVol = el.getAttribute('data-v'); S.tStage = ''; S.tQ = ''; return screenTracker(); }
+    if (act === 'tstage') { var s = el.getAttribute('data-s') || ''; S.tStage = S.tStage === s ? '' : s; if (S.tStage === 'Final') { S.tHide = false; trackerPref('mdyTHideFinal', '0'); } return screenTracker(); }
+    if (act === 'thide') { S.tHide = !S.tHide; trackerPref('mdyTHideFinal', S.tHide ? '1' : '0'); if (S.tHide && S.tStage === 'Final') S.tStage = ''; return screenTracker(); }
+    if (act === 'tpics') { S.tPics = !S.tPics; trackerPref('mdyTPics', S.tPics ? '1' : '0'); return screenTracker(); }
+    var rid = el.getAttribute('data-id'), row = (S.tracker || []).filter(function (r) { return r.id === rid; })[0]; if (!row) return;
+    var card = el.closest('.tcard'); if (card) card.classList.add('busy');
+    try {
+      var f = el.getAttribute('data-f'), o = {};
+      if (act === 'tnext') { var n = nextStage(row.stage, row.masechta, row.workflow); if (n !== row.stage) await boardWrite(row, { Stage: n }, row.title + ' moved to ' + n); }
+      else if (act === 'tback') { var b = prevStage(row.stage, row.masechta, row.workflow); if (b) await boardWrite(row, { Stage: b }, row.title + ' moved back to ' + b); }
+      else if (act === 'tgnext') { var i = GSTEPS.indexOf(row.f[f]); o[f] = i < 0 ? 'Requested' : GSTEPS[Math.min(i + 1, GSTEPS.length - 1)]; await boardWrite(row, o, 'Picture moved to ' + o[f]); }
+      else if (act === 'tgback') { var j = GSTEPS.indexOf(row.f[f]); o[f] = j > 0 ? GSTEPS[j - 1] : null; await boardWrite(row, o, o[f] ? 'Picture back to ' + o[f] : 'Picture taken off'); }
+      else if (act === 'tgadd') { o[f] = 'Requested'; await boardWrite(row, o, 'Picture added'); }
+    } catch (e) { toast('Could not change ' + row.title + ': ' + e.message); }
+    return screenTracker();
+  }
+
+  /* My work: where each volume stands, one small ring per volume (as the site's Home page) */
+  function volumeDonuts(rows) {
+    var vols = trackerVolumes(rows); if (!vols.length) return '';
+    var R = 30, Cc = 2 * Math.PI * R, used = {};
+    var items = vols.map(function (v) {
+      var off = 0, segs = v.order.filter(function (s) { return v.count[s]; }), gap = segs.length > 1 ? 1.6 : 0;
+      var arcs = segs.map(function (s) {
+        used[s] = 1;
+        var len = v.count[s] / v.total * Cc, d = Math.max(len - gap, 0.8);
+        var a = '<circle cx="40" cy="40" r="' + R + '" fill="none" stroke="' + stageColor(s) + '" stroke-width="11" stroke-dasharray="' + d.toFixed(2) + ' ' + (Cc - d).toFixed(2) + '" stroke-dashoffset="' + (-off).toFixed(2) + '"/>';
+        off += len; return a;
+      }).join('');
+      var tip = v.name + ': ' + segs.map(function (s) { return s + ' ' + v.count[s]; }).join(', ');
+      return '<a class="vdi" href="#/tracker/' + encodeURIComponent(v.name) + '" title="' + esc(tip) + '" aria-label="' + esc(tip + '. ' + v.done + ' of ' + v.total + ' in Final.') + '">' +
+        '<svg viewBox="0 0 80 80" width="76" height="76" aria-hidden="true"><circle cx="40" cy="40" r="' + R + '" fill="none" stroke="#eef0f3" stroke-width="11"/><g transform="rotate(-90 40 40)">' + arcs + '</g>' +
+        '<text x="40" y="39" text-anchor="middle" font-family="Frank Ruhl Libre,Georgia,serif" font-weight="700" font-size="17" fill="#0b1f3a">' + v.done + '</text>' +
+        '<text x="40" y="52" text-anchor="middle" font-family="Source Sans 3,sans-serif" font-size="10" fill="#5b6573">of ' + v.total + '</text></svg>' +
+        '<b>' + esc(v.name) + '</b><small>in Final</small></a>';
+    }).join('');
+    var key = Object.keys(C.stageColors).filter(function (s) { return used[s]; }).map(function (s) { return '<span><i style="background:' + stageColor(s) + '"></i>' + esc(s) + '</span>'; }).join('');
+    return '<h2 class="sec">Where each volume stands</h2><div class="card vd"><div class="vdgrid">' + items + '</div><div class="vdkey">' + key + '</div></div>';
   }
 
   function openMoveSheet(row) {
@@ -3807,7 +3939,8 @@
       catch (e) { closeSheet(); toast('Could not move it: ' + e.message); }
       return;
     }
-    if (act === 'tmine') { S.trackerMine = !S.trackerMine; route(); return; }
+    if (act === 'tmine') { S.trackerMine = !S.trackerMine; if (currentRoute().indexOf('tracker') > -1) screenTracker(); else route(); return; }
+    if (/^t(vol|stage|hide|pics|next|back|gnext|gback|gadd)$/.test(act)) { boardAct(act, el); return; }
     if (act === 'tm') { location.hash = '#/tracker/' + encodeURIComponent(el.getAttribute('data-m')); return; }
     if (act === 'gfx') { gfxAct(el); return; }
     if (act === 'gfxundo') { gfxUndo(); return; }

@@ -83,11 +83,12 @@ window.MDY_CONFIG = {
   graphicsStages: ['Requests', 'Writer Requests', 'Prompts', 'Needs Approval', 'Ready for Review', 'Ready for Designer', 'Ready for Designing', 'Pending Charts', 'Ready to Go', 'Rejected'],
   /* The site's colour key, one colour per stage */
   stageColors: {
-    'Open': '#e74c3c', 'Generated': '#ffa040', 'Written': '#ffa040', 'Edited': '#8b6348',
-    'Reviewed': '#9b4f96', 'Run': '#9b4f96', 'Edited 2': '#1a54a8', 'Mevukar': '#7b1fa2',
-    'Kramer': '#607d8b', 'Post Kramer': '#00bcd4', 'Edited 3': '#e91e63', 'Review 2': '#f9e000',
-    'Mevukar 2': '#f9e000', 'Proofread': '#a9db5e', 'Check': '#00695c', 'Final': '#1db954', 'Closed': '#1db954',
+    /* toned to match the site's sleeker look (8 Nov 2026); the same hues as before */
+    'Open': '#c9483b', 'Generated': '#d9822b', 'Written': '#d9822b', 'Edited': '#8b6348',
+    'Reviewed': '#9b4f96', 'Run': '#9b4f96', 'Edited 2': '#2a5db0', 'Mevukar': '#7b3fa8',
+    'Kramer': '#5f7c8a', 'Post Kramer': '#2b8fa3', 'Edited 3': '#b8456f', 'Review 2': '#b59a1c',
+    'Mevukar 2': '#b59a1c', 'Proofread': '#6f9e2e', 'Check': '#00695c', 'Final': '#1f8a4c', 'Closed': '#1f8a4c',
     /* Berachos stages, the same colours as its tab on the site's Amud Tracker */
-    'Final Edited': '#1a54a8', 'AI Checked': '#00bcd4', 'AI Proofread': '#607d8b'
+    'Final Edited': '#2a5db0', 'AI Checked': '#2b8fa3', 'AI Proofread': '#5f7c8a'
   }
 };
