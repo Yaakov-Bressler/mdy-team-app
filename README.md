@@ -1,6 +1,6 @@
-# MDY Team App
+# Aleh Zayis Gemara Team App
 
-The MDY Aleh Zayis team app: your amudim, the Amud Tracker, submitting work, the Guide look-ups, deadlines, graphics, feedback and contacts, on phone and computer.
+The Aleh Zayis Gemara Team app: your amudim, the Amud Tracker, submitting work, the Guide look-ups, deadlines, graphics, feedback and contacts, on phone and computer.
 
 **Open it:** https://yaakov-bressler.github.io/mdy-team-app/
 

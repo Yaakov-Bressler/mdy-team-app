@@ -2702,9 +2702,9 @@
   /* ---------- rendering frame ---------- */
   var view = function () { return $('#view'); };
   function frame(o) {
-    $('#kicker').innerHTML = o.back ? '<a href="' + o.back + '">' + ICON.back + esc(o.backLabel || 'Back') + '</a>' : esc(o.kicker || 'MDY Aleh Zayis Team');
+    $('#kicker').innerHTML = o.back ? '<a href="' + o.back + '">' + ICON.back + esc(o.backLabel || 'Back') + '</a>' : esc(o.kicker || 'Aleh Zayis Gemara Team');
     $('#title').textContent = o.title;
-    document.title = o.title === 'MDY Team' ? 'MDY Team' : o.title + ' · MDY Team';
+    document.title = o.title === 'Aleh Zayis Team' ? 'Aleh Zayis Team' : o.title + ' · Aleh Zayis Team';
     $('#subhead').innerHTML = o.sub || '';
     $('#refresh').hidden = !o.refresh;
     var base = currentRoute().replace(/^\/?/, '').split('/')[0] || 'home';
@@ -2723,7 +2723,7 @@
 
   /* ---------- screens ---------- */
   async function screenHome() {
-    frame({ title: 'My work', tab: 'home', refresh: true, kicker: 'MDY Aleh Zayis Team' });
+    frame({ title: 'My work', tab: 'home', refresh: true, kicker: 'Aleh Zayis Gemara Team' });
     loading();
     var res = await Promise.all([loadTracker(), loadDeadlines().catch(function () { return []; })]);
     var rows = res[0], dls = res[1];
@@ -2761,7 +2761,7 @@
       return d.days >= 0 || (tg && dlRows(d, rows).length);
     });
     var myNext = (who ? upcoming.filter(function (d) { return ownerKey(d) === who; })[0] : upcoming.filter(deadlineIsMine)[0]) || (proofDesk ? null : upcoming[0]);
-    frame({ title: 'My work', tab: 'home', refresh: true, kicker: (S.me && S.me.displayName) || 'MDY Aleh Zayis Team' });
+    frame({ title: 'My work', tab: 'home', refresh: true, kicker: (S.me && S.me.displayName) || 'Aleh Zayis Gemara Team' });
     var h = '<div class="homegrid"><div class="hg-top">';
     if (myNext) h += '<a class="card dl" href="#/deadlines" style="text-decoration:none">' + deadlineCard(myNext).replace(/^<article class="card dl">|<\/article>$/g, '') + '</a>';
     h += '<a class="btn block" href="#/submit">' + ICON.up + 'Submit work</a></div><div class="hg-list">';
@@ -3402,7 +3402,7 @@
   }
 
   function screenMore() {
-    frame({ title: 'More', tab: 'more', kicker: 'MDY Aleh Zayis Team' });
+    frame({ title: 'More', tab: 'more', kicker: 'Aleh Zayis Gemara Team' });
     setView('<div class="card" style="display:flex;align-items:center;gap:12px"><div style="width:46px;height:46px;border-radius:999px;background:var(--navy);color:var(--gold);display:flex;align-items:center;justify-content:center;font-weight:700">' + esc(initials()) + '</div><div><b>' + esc((S.me && S.me.displayName) || '') + '</b><div class="note">Signed in with your Aleh Zayis account</div></div></div>' +
       '<nav class="card pad0 navlist" aria-label="More pages">' +
       '<a href="#/ask">' + ICON.ask + '<span class="grow">Ask Chaim Levy</span><span class="aside">AI assistant</span>' + ICON.chev + '</a>' +
@@ -4027,9 +4027,9 @@
 
   /* ---------- start ---------- */
   function signInScreen(msg) {
-    frame({ title: 'MDY Team', tab: '' });
+    frame({ title: 'Aleh Zayis Team', tab: '' });
     $('#tabs').hidden = true;
-    setView('<div class="signin"><img src="icons/icon-192.png" alt=""><h2>MDY Aleh Zayis Team</h2><p>Sign in with your Aleh Zayis account to see your amudim, the tracker, the Guide and deadlines.</p>' +
+    setView('<div class="signin"><img src="icons/icon-192.png" alt=""><h2>Aleh Zayis Gemara Team</h2><p>Sign in with your Aleh Zayis account to see your amudim, the tracker, the Guide and deadlines.</p>' +
       (msg ? '<div class="err">' + esc(msg) + '</div>' : '') +
       '<button class="btn block" data-act="signin" style="max-width:320px">Sign in</button></div>');
   }

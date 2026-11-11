@@ -1,7 +1,7 @@
 {
-  "name": "MDY Aleh Zayis Team",
-  "short_name": "MDY Team",
-  "description": "Your amudim, the tracker, submissions, the Guide and deadlines for the MDY Aleh Zayis team.",
+  "name": "Aleh Zayis Gemara Team",
+  "short_name": "Aleh Zayis Team",
+  "description": "Your amudim, the tracker, submissions, the Guide and deadlines for the Aleh Zayis Gemara Team.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
