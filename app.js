@@ -3416,7 +3416,7 @@
       '<a href="' + esc(C.chatUrl) + '" target="_blank" rel="noopener">' + ICON.chat + '<span class="grow">Team chat</span><span class="aside">Google Chat</span></a>' +
       '<a href="' + esc(C.siteUrl) + '" target="_blank" rel="noopener">' + ICON.ext + '<span class="grow">Open the full SharePoint site</span></a>' +
       '</nav><button class="btn ghost block" data-act="signout">' + ICON.out.replace('<svg ', '<svg style="width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round" ') + 'Sign out</button>' +
-      '<p class="slogan">It’s not about the Daf, it’s about the Yomi!</p>');
+      '');
   }
 
   /* ---------- Deadlines screen (YB, 6 Nov 2026: "cleaner, there's too much info"; order by date or by masechta) ----------
