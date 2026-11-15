@@ -323,7 +323,7 @@
     New: ['Open', 'Generated', 'Edited', 'Reviewed', 'Mevukar', 'Kramer', 'Post Kramer', 'Edited 2', 'Edited 3', 'Review 2', 'Proofread', 'Check', 'Final'],
     Old: ['Open', 'Written', 'Run', 'Edited', 'Mevukar', 'Kramer', 'Post Kramer', 'Edited 2', 'Mevukar 2', 'Proofread', 'Closed'],
     /* Berachos (YB, 3 Nov 2026): its own nine stages; no Kramer and no Edited 2. Rows with Workflow 'Berachos' rank here */
-    Berachos: ['Open', 'Generated', 'Edited', 'Mevukar', 'Final Edited', 'AI Checked', 'AI Proofread', 'Proofread', 'Final']
+    Berachos: ['Open', 'Generated', 'Edited', 'Mevukar', 'Final Edited', 'Mevaker Review', 'AI Checked', 'AI Proofread', 'Proofread', 'Final']
   };
   /* a "Done when" choice with no stage for a row's workflow (Post Kramer or Edited 2 on Berachos, Final Edited elsewhere)
      does not apply to that row: it is left out of the deadline, never counted done (as the core, 3 Nov 2026) */
@@ -331,6 +331,7 @@
     'Edited (first-round editing)': { New: 'Edited', Old: 'Edited', Berachos: 'Edited' },
     'Mevukar (content editors)': { New: 'Mevukar', Old: 'Mevukar', Berachos: 'Mevukar' },
     'Final Edited (final editors)': { Berachos: 'Final Edited' },
+    'Mevaker Review (mevakrim)': { Berachos: 'Mevaker Review' }, /* YB, 15 Nov 2026: the mevaker's review, file in his Final Editing folder */
     "Post Kramer (back from R' Kramer)": { New: 'Post Kramer', Old: 'Post Kramer' },
     "Edited 2 (in R' Waldman's folder)": { New: 'Edited 2', Old: 'Edited 2' }, /* YB, 2 Nov 2026: R' Waldman's pass done, file in his folder */
     'Proofread': { New: 'Proofread', Old: 'Proofread', Berachos: 'Proofread' },
@@ -437,7 +438,7 @@
   /* an amud is on the desk now once it has reached the stage its deadline's work starts from (or later); earlier than that,
      it is still coming. YB, 2 Nov 2026: a Mevukar deadline starts from Edited (not Reviewed); an Edited 2 deadline (the
      "Post Kramer" choice on Kerisos, i.e. in R' Waldman's folder) starts from Kramer. Otherwise: the stage just before. */
-  var DESK_FROM = { 'Mevukar': 'Edited', 'Post Kramer': 'Kramer', 'Edited 2': 'Kramer', 'Final Edited': 'Mevukar' };
+  var DESK_FROM = { 'Mevukar': 'Edited', 'Post Kramer': 'Kramer', 'Edited 2': 'Kramer', 'Final Edited': 'Mevukar', 'Mevaker Review': 'Final Edited' };
   function deskNow(r, want) {
     if (!want) return true;
     var L = stagesFor(r.masechta, r.workflow), si = L.indexOf(r.stage);
@@ -463,7 +464,7 @@
   /* Berachos (YB, 5 Nov 2026): R' Waldman's Berachos final editing ("Final Edited (final editors)") gets the same areas. No R' Kramer
      there: an amud is his to edit once back from the content editor (Mevukar); Final Edited, AI Checked and AI Proofread are with the
      final check, the AI proofreader and Mrs. Mayer; Proofread is back for his review */
-  var FE_B_EDIT = { 'Mevukar': 1 }, FE_B_REV = { 'Proofread': 1 }, FE_B_PROOF = { 'Final Edited': 1, 'AI Checked': 1, 'AI Proofread': 1 };
+  var FE_B_EDIT = { 'Mevukar': 1 }, FE_B_REV = { 'Proofread': 1 }, FE_B_PROOF = { 'Final Edited': 1, 'Mevaker Review': 1, 'AI Checked': 1, 'AI Proofread': 1 }; /* Final Edited = with the mevaker since 15 Nov 2026 */
   function dlIsFE(d) { var t = dlWant(d); return t === 'Final' || t === 'Edited 2' || t === 'Final Edited'; }
   function finalAreas(dls, rows, test) {
     var A = { edit: { now: [], later: [] }, bedit: { now: [], later: [] }, rev: { now: [], later: [] }, seen: {}, ids: {} };
@@ -491,7 +492,7 @@
   /* Mrs. Mayer's proofreading desk, as the site's My Desk reads it (YB, 4-5 Nov 2026). She has no deadline. An amud at Edited 2
      (Berachos: Final Edited, AI Checked or AI Proofread) is on her desk once Claude's proofreading pass is in
      <masechta>/Proofreading/Claude; until then it, and amudim at Kramer, are coming later. */
-  var PROOF_B = { 'Final Edited': 1, 'AI Checked': 1, 'AI Proofread': 1 };
+  var PROOF_B = { 'Final Edited': 1, 'Mevaker Review': 1, 'AI Checked': 1, 'AI Proofread': 1 }; /* Mevaker Review (15 Nov 2026): the AI check and AI proofread start from the mevaker's file */
   function proofStageWaiting(r) { return r.masechta === 'Berachos' ? !!PROOF_B[r.stage] : (r.stage === 'Edited 2' || r.stage === 'Kramer'); }
   function proofWaiting(rows) { return rows.some(proofStageWaiting); }
   var RE_DAF = /(?:^|[^0-9])(\d{1,3})([ab])(?=$|[^a-z]|part|ii?(?:[^a-z]|$))/i;
@@ -2777,6 +2778,7 @@
         var r = it.r, ber = r.masechta === 'Berachos';
         if (!later) return kind === 'rev' ? 'For you: review Mrs. Mayer’s proofread, then put it in Final'
           : ber ? 'For you: your final edit, then Submit (it goes to Final Editing)' : 'For you: your edit, then Submit (it goes to your Edited 2 folder)';
+        if (kind === 'rev' && ber && r.stage === 'Final Edited') return 'Waiting: with the mevaker (Mevaker Review)';
         if (kind === 'rev') return feAi[r.id] ? 'Waiting: with Mrs. Mayer (the AI proofread is done)' : ber ? 'Waiting: the AI check and AI proofread, then Mrs. Mayer' : 'Waiting: the AI proofread, then Mrs. Mayer';
         var w = { 'Open': 'not written yet', 'Generated': 'with the first-round editor', 'Written': 'with the first-round editor', 'Run': 'with the first-round editor',
           'Edited': r.masechta === 'Kerisos' ? 'with R’ Muller (review)' : 'with the content editor', 'Reviewed': 'with the content editor',
@@ -2847,7 +2849,7 @@
      as the site's board and the old SharePoint cards do. The Old/New grouping is retired. */
   var HOLDER = { 'Open': 'Not started', 'Generated': 'Drafted', 'Written': 'Drafted', 'Edited': 'Editing', 'Reviewed': 'Editing', 'Run': 'Editing',
     'Edited 2': 'Editing', 'Edited 3': 'Editing', 'Mevukar': 'Mevaker', 'Review 2': 'Mevaker', 'Mevukar 2': 'Mevaker', 'Kramer': 'R’ Kramer',
-    'Post Kramer': 'R’ Kramer', 'Final Edited': 'Final editing', 'Proofread': 'Proofreading', 'Final': 'Done', 'Closed': 'Done' };
+    'Post Kramer': 'R’ Kramer', 'Final Edited': 'Final editing', 'Mevaker Review': 'Mevaker review', 'Proofread': 'Proofreading', 'Final': 'Done', 'Closed': 'Done' };
   var BACK_OLD = { 'Written': 'Open', 'Run': 'Generated', 'Reviewed': 'Edited', 'Post Kramer': 'Kramer', 'Edited 3': 'Edited 2', 'Review 2': 'Edited 2', 'Mevukar 2': 'Edited 2', 'Closed': 'Proofread' };
   var GF = ['GraphicOne', 'GraphicTwo', 'GraphicThree', 'GraphicFour', 'GraphicFive'];
   var GSTEPS = ['Requested', 'Prompted', 'Needs Approval', 'Approved', 'Reviewed', 'Ready to Go'];
@@ -3113,7 +3115,7 @@
              be more organized for berachos") -> Final Editing where the masechta has one (Berachos onward), otherwise Proofreading
              (your folder there, or R' Waldman's) */
           if (!s.roleTouched) {
-            var want = { 'Mevukar': 'Mevakrim', 'Proofread': 'Proofreading', 'Final': 'Final' }[s.stage] || 'Editors';
+            var want = { 'Mevukar': 'Mevakrim', 'Final Edited': 'Final Editing', 'Mevaker Review': 'Final Editing', 'Proofread': 'Proofreading', 'Final': 'Final' }[s.stage] || 'Editors';
             if (s.stage === 'Edited 2') want = roles.some(function (x) { return /^final editing$/i.test(x.name); }) ? 'Final Editing' : 'Proofreading';
             var hit = roles.filter(function (x) { return x.name.toLowerCase() === want.toLowerCase(); })[0];
             if (hit && hit.name !== s.role) { s.role = hit.name; s.person = null; }

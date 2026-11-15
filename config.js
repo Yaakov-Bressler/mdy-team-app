@@ -37,7 +37,7 @@ window.MDY_CONFIG = {
     /* Berachos (YB, 3 Nov 2026): no Kramer; final editing (R' Waldman, R' Bressler), then the final check (AI Checked)
        and the AI proofread before the proofreader */
     { name: 'Berachos', masechtos: ['Berachos'],
-      stages: ['Open', 'Generated', 'Edited', 'Mevukar', 'Final Edited', 'Proofread', 'Final'] } /* AI Checked and AI Proofread removed (YB, 5 Nov 2026): the AI steps send emails and never move the tracker */
+      stages: ['Open', 'Generated', 'Edited', 'Mevukar', 'Final Edited', 'Mevaker Review', 'Proofread', 'Final'] } /* Mevaker Review (YB, 15 Nov 2026): after the final editor, a mevaker reviews it in his own Final Editing folder (R' Goodman) */ /* AI Checked and AI Proofread removed (YB, 5 Nov 2026): the AI steps send emails and never move the tracker */
   ],
   /* A row still on a stage that has been taken off its workflow moves on to this one with Next / Submit (28 Oct 2026). */
   retiredNext: { 'Written': 'Edited', 'Run': 'Edited', 'Post Kramer': 'Edited 2', 'Edited 3': 'Proofread', 'Review 2': 'Proofread', 'Mevukar 2': 'Proofread', 'Check': 'Final', 'Closed': 'Final' },
@@ -89,6 +89,6 @@ window.MDY_CONFIG = {
     'Kramer': '#5f7c8a', 'Post Kramer': '#2b8fa3', 'Edited 3': '#b8456f', 'Review 2': '#b59a1c',
     'Mevukar 2': '#b59a1c', 'Proofread': '#6f9e2e', 'Check': '#00695c', 'Final': '#1f8a4c', 'Closed': '#1f8a4c',
     /* Berachos stages, the same colours as its tab on the site's Amud Tracker */
-    'Final Edited': '#2a5db0', 'AI Checked': '#2b8fa3', 'AI Proofread': '#5f7c8a'
+    'Final Edited': '#2a5db0', 'Mevaker Review': '#2b8fa3', 'AI Checked': '#2b8fa3', 'AI Proofread': '#5f7c8a'
   }
 };
