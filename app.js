@@ -714,6 +714,18 @@
       return { id: it.id, f: f, title: f.Title || '', due: due, days: daysUntil(due), lines: lines, created: it.createdDateTime || null };
     }));
     items.sort(function (a, b) { return (a.due || '9') < (b.due || '9') ? -1 : 1; });
+    /* every mevaker's desk has both his stages (YB, 15 Nov 2026): a Berachos content-editing deadline ("Mevukar") also gives its owner
+       the mevaker review ("Mevaker Review") of the same amudim, with no due date. Desk only: never shown on the Deadlines screen,
+       never written to the Deadlines list, and no email. Skipped when he already has a real Mevaker Review deadline on Berachos. */
+    var haveMR = {};
+    items.forEach(function (d) { if (String((d.f || {}).Target || '').trim() === 'Mevaker Review (mevakrim)') haveMR[String((d.f || {}).Owner || '').toLowerCase()] = 1; });
+    items.slice().forEach(function (d) {
+      var f = d.f || {}, ms = dlMasechtos(f.Masechta);
+      if (String(f.Target || '').trim() !== 'Mevukar (content editors)' || ms.length !== 1 || ms[0] !== 'Berachos' || haveMR[String(f.Owner || '').toLowerCase()]) return;
+      var t = /content editing/i.test(d.title) ? d.title.replace(/content editing/i, 'mevaker review') : d.title + ' · mevaker review';
+      items.push({ id: 'mr' + d.id, f: Object.assign({}, f, { Target: 'Mevaker Review (mevakrim)', Title: t }), title: t, due: null, days: null,
+        lines: d.lines.filter(function (l) { return !l.stage; }), created: d.created, derived: true });
+    });
     S.deadlines = items;
     return items;
   }
@@ -3510,7 +3522,7 @@
     frame({ title: 'Deadlines', tab: 'more', back: '#/more', backLabel: 'More', refresh: true, sub: sub });
     loading();
     var got = await Promise.all([loadDeadlines(), loadTracker().catch(function () { return null; })]);
-    var all = got[0];
+    var all = got[0].filter(function (d) { return !d.derived; }); /* the desk-only Mevaker Review entries (15 Nov 2026) are not deadlines */
     var list = S.deadlineFilter === 'Mine' ? all.filter(deadlineIsMine) : all;
     /* as on the site (YB, 4 Nov 2026): a finished deadline drops off once its due date has passed; an unfinished one stays, overdue */
     list = list.filter(function (d) {
