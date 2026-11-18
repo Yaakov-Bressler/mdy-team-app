@@ -3547,7 +3547,9 @@
     var ms = [];
     for (var i = 0; i < C.masechtos.length; i++) {
       var mf = await masechtaFolder(C.masechtos[i]);
-      if (mf && await subFolder(mf, 'Graphics')) ms.push(C.masechtos[i]);
+      /* YB, 18 Nov 2026: a masechta whose Graphics folder holds a file named _graphics-closed* is closed and left off this screen (same marker as the site's Graphics board). Delete the file to reopen it. */
+      var gfo = mf ? await subFolder(mf, 'Graphics') : null;
+      if (gfo && !(await kids(gfo.id)).some(function (x) { return x.file && /^_graphics-closed(\.|$)/i.test(x.name); })) ms.push(C.masechtos[i]);
     }
     var m = S.graphicsM && ms.indexOf(S.graphicsM) > -1 ? S.graphicsM : ms[0];
     S.graphicsM = m;
